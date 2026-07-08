@@ -14,5 +14,4 @@ public class LTLedgerQuery {
     private LocalDate contractEndDate;
 
     private Boolean isGreen;
-    private LocalDate transactionDate;
 }

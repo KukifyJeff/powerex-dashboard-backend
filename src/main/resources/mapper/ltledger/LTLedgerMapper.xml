@@ -46,27 +46,77 @@
 
     <select id="getLedgerDetail" resultType="com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerDTO">
         SELECT
+            t.id AS id,
+            t.transaction_id AS transactionId,
             c.id AS companyId,
             c.name AS companyName,
 
+            t.place AS place,
+            t.transaction_date AS transactionDate,
+            t.transaction_name AS transactionName,
+
             t.transaction_type_id AS transactionTypeId,
+            tt.name AS transactionTypeName,
+
+            t.outsend_province AS outsendProvince,
+
             t.gen_type_id AS genTypeId,
+            gt.name AS genTypeName,
+
             t.transaction_period_id AS transactionPeriodId,
+            tp.name AS transactionPeriodName,
+
+            t.transaction_start_year AS transactionStartYear,
+            t.transaction_end_year AS transactionEndYear,
+
             t.contract_start_date AS contractStartDate,
             t.contract_end_date AS contractEndDate,
+
             t.is_green AS isGreen,
+            t.is_cheap AS isCheap,
 
+            t.base_price AS basePrice,
+            t.market_size AS marketSize,
+            t.market_participation_capacity AS marketParticipationCapacity,
+            t.market_avg_price AS marketAvgPrice,
+            t.chng_participation_capacity AS chngParticipationCapacity,
             t.chng_transaction_amount AS chngTransactionAmount,
-            t.chng_avg_price AS chngTradedPrice
+            t.chng_avg_price AS chngTradedPrice,
+            t.env_premium AS envPremium,
 
-        FROM companies c
-        LEFT JOIN longterm_transactions t
-            ON c.id = t.company_id
+            t.data_source AS dataSource,
+            t.note AS note,
+            t.created_at AS createdAt
+
+        FROM longterm_transactions t
+        JOIN companies c ON c.id = t.company_id
         LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
         LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
         LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
 
-        <include refid="BaseWhere"/>
+        WHERE 1=1
+        <if test="genTypeIds != null and genTypeIds.size() &gt; 0">
+            AND t.gen_type_id IN
+            <foreach collection="genTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
+        <if test="transactionTypeIds != null and transactionTypeIds.size() &gt; 0">
+            AND t.transaction_type_id IN
+            <foreach collection="transactionTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
+        <if test="transactionPeriodIds != null and transactionPeriodIds.size() &gt; 0">
+            AND t.transaction_period_id IN
+            <foreach collection="transactionPeriodIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
+        <if test="contractStartDate != null and contractStartDate != ''">
+            AND t.contract_start_date &gt;= #{contractStartDate}
+        </if>
+        <if test="contractEndDate != null and contractEndDate != ''">
+            AND t.contract_end_date &lt;= #{contractEndDate}
+        </if>
+        <if test="greenPowerList != null and greenPowerList.size() &gt; 0">
+            AND t.is_green IN
+            <foreach collection="greenPowerList" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
     </select>
 
 
@@ -80,29 +130,41 @@
             c.id AS companyId,
             c.name AS companyName,
 
-            t.gen_type_id AS genTypeId,
-            t.transaction_type_id AS transactionTypeId,
-            t.transaction_period_id AS transactionPeriodId,
-            t.contract_start_date AS contractStartDate,
-            t.contract_end_date AS contractEndDate,
-            t.is_green AS isGreen,
-
             COALESCE(SUM(t.chng_transaction_amount), 0) AS chngTransactionAmount,
 
             COALESCE(
-                SUM(t.chng_transaction_amount * t.chng_avg_price)
-                / NULLIF(SUM(t.chng_transaction_amount), 0),
+                SUM(t.chng_transaction_amount * t.chng_avg_price) / NULLIF(SUM(t.chng_transaction_amount), 0),
                 0
             ) AS chngTradedPrice
 
         FROM companies c
         LEFT JOIN longterm_transactions t
             ON c.id = t.company_id
+            <if test="genTypeIds != null and genTypeIds.size() &gt; 0">
+                AND t.gen_type_id IN
+                <foreach collection="genTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </if>
+            <if test="transactionTypeIds != null and transactionTypeIds.size() &gt; 0">
+                AND t.transaction_type_id IN
+                <foreach collection="transactionTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </if>
+            <if test="transactionPeriodIds != null and transactionPeriodIds.size() &gt; 0">
+                AND t.transaction_period_id IN
+                <foreach collection="transactionPeriodIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </if>
+            <if test="contractStartDate != null and contractStartDate != ''">
+                AND t.contract_start_date &gt;= #{contractStartDate}
+            </if>
+            <if test="contractEndDate != null and contractEndDate != ''">
+                AND t.contract_end_date &lt;= #{contractEndDate}
+            </if>
+            <if test="greenPowerList != null and greenPowerList.size() &gt; 0">
+                AND t.is_green IN
+                <foreach collection="greenPowerList" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </if>
         LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
         LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
         LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
-
-        <include refid="BaseWhere"/>
 
         GROUP BY
             c.id,
@@ -147,22 +209,32 @@
         SELECT
             DATE_FORMAT(t.contract_start_date,'%Y-%m') AS period,
             COALESCE(SUM(t.chng_transaction_amount),0) AS tradedPower,
-            COALESCE(
-                SUM(t.base_price * t.chng_transaction_amount)
-                / NULLIF(SUM(t.chng_transaction_amount),0),0
-            ) AS weightedBenchmarkPrice,
-            COALESCE(
-                SUM(t.chng_avg_price * t.chng_transaction_amount)
-                / NULLIF(SUM(t.chng_transaction_amount),0),0
-            ) AS chngTradedPrice
-        FROM companies c
-        LEFT JOIN longterm_transactions t ON c.id = t.company_id
-        LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
-        LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
-        LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
-
-        <include refid="BaseWhere"/>
-
+            COALESCE(SUM(t.base_price * t.chng_transaction_amount) / NULLIF(SUM(t.chng_transaction_amount),0),0) AS weightedBenchmarkPrice,
+            COALESCE(SUM(t.chng_avg_price * t.chng_transaction_amount) / NULLIF(SUM(t.chng_transaction_amount),0),0) AS chngTradedPrice
+        FROM longterm_transactions t
+        WHERE 1=1
+        <if test="genTypeIds != null and genTypeIds.size() &gt; 0">
+            AND t.gen_type_id IN
+            <foreach collection="genTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
+        <if test="transactionTypeIds != null and transactionTypeIds.size() &gt; 0">
+            AND t.transaction_type_id IN
+            <foreach collection="transactionTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
+        <if test="transactionPeriodIds != null and transactionPeriodIds.size() &gt; 0">
+            AND t.transaction_period_id IN
+            <foreach collection="transactionPeriodIds" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
+        <if test="contractStartDate != null and contractStartDate != ''">
+            AND t.contract_start_date &gt;= #{contractStartDate}
+        </if>
+        <if test="contractEndDate != null and contractEndDate != ''">
+            AND t.contract_end_date &lt;= #{contractEndDate}
+        </if>
+        <if test="greenPowerList != null and greenPowerList.size() &gt; 0">
+            AND t.is_green IN
+            <foreach collection="greenPowerList" item="item" open="(" separator="," close=")">#{item}</foreach>
+        </if>
         GROUP BY DATE_FORMAT(t.contract_start_date,'%Y-%m')
         ORDER BY DATE_FORMAT(t.contract_start_date,'%Y-%m')
     </select>

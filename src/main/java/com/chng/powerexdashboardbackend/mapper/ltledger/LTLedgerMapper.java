@@ -17,7 +17,7 @@ public interface LTLedgerMapper {
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
         @Param("contractEndDate") String contractEndDate,
-        @Param("greenPowerList") List<String> greenPowerList
+        @Param("greenPowerList") List<Integer> greenPowerList
     );
 
     List<LTLedgerDTO> getLedgerDetail(
@@ -26,7 +26,7 @@ public interface LTLedgerMapper {
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
         @Param("contractEndDate") String contractEndDate,
-        @Param("greenPowerList") List<String> greenPowerList
+        @Param("greenPowerList") List<Integer> greenPowerList
     );
 
     LTLedgerSummaryDTO getLedgerSummary(
@@ -35,7 +35,7 @@ public interface LTLedgerMapper {
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
         @Param("contractEndDate") String contractEndDate,
-        @Param("greenPowerList") List<String> greenPowerList
+        @Param("greenPowerList") List<Integer> greenPowerList
     );
 
     List<LTLedgerTrendDTO> getLedgerTrend(
@@ -44,7 +44,7 @@ public interface LTLedgerMapper {
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
         @Param("contractEndDate") String contractEndDate,
-        @Param("greenPowerList") List<String> greenPowerList
+        @Param("greenPowerList") List<Integer> greenPowerList
     );
 
     // helper: name -> id

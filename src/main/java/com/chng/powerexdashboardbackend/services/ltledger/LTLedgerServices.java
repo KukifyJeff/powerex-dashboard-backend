@@ -30,7 +30,7 @@ public class LTLedgerServices {
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
-        List<String> green = buildGreenList(query.getIsGreen());
+        List<Integer> green = buildGreenList(query.getIsGreen());
 
         List<LTLedgerDTO> rows = mapper.getLedgerPivot(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
         List<Map<String, Object>> table = pivotServices.buildPivot(rows);
@@ -52,7 +52,7 @@ public class LTLedgerServices {
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
-        List<String> green = buildGreenList(query.getIsGreen());
+        List<Integer> green = buildGreenList(query.getIsGreen());
         return mapper.getLedgerDetail(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
     }
 
@@ -66,7 +66,7 @@ public class LTLedgerServices {
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
-        List<String> green = buildGreenList(query.getIsGreen());
+        List<Integer> green = buildGreenList(query.getIsGreen());
         return mapper.getLedgerSummary(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
     }
 
@@ -76,7 +76,7 @@ public class LTLedgerServices {
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
-        List<String> green = buildGreenList(query.getIsGreen());
+        List<Integer> green = buildGreenList(query.getIsGreen());
         return mapper.getLedgerTrend(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
     }
 
@@ -112,10 +112,10 @@ public class LTLedgerServices {
         return q.getTransactionPeriodIds();
     }
 
-    private List<String> buildGreenList(Boolean isGreen) {
+    private List<Integer> buildGreenList(Boolean isGreen) {
         if (isGreen == null) return null;
-        List<String> l = new ArrayList<>();
-        l.add(isGreen ? "Y" : "N");
+        List<Integer> l = new ArrayList<>();
+        l.add(isGreen ? 1 : 0);
         return l;
     }
 }
