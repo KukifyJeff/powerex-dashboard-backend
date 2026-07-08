@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.chng.powerexdashboardbackend.mapper.ltledger.LTLedgerMapper">
+
+    <sql id="BaseWhere">
+        WHERE 1=1
+
+        <if test="companyIds != null and companyIds.size() > 0">
+            AND (t.company_id IS NULL OR t.company_id IN
+            <foreach collection="companyIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="companyNames != null and companyNames.size() > 0">
+            AND (c.name IS NULL OR c.name IN
+            <foreach collection="companyNames" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="genTypeIds != null and genTypeIds.size() > 0">
+            AND (t.gen_type_id IS NULL OR t.gen_type_id IN
+            <foreach collection="genTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="genTypeNames != null and genTypeNames.size() > 0">
+            AND (gt.name IS NULL OR gt.name IN
+            <foreach collection="genTypeNames" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="transactionTypeIds != null and transactionTypeIds.size() > 0">
+            AND (t.transaction_type_id IS NULL OR t.transaction_type_id IN
+            <foreach collection="transactionTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="transactionTypes != null and transactionTypes.size() > 0">
+            AND (tt.name IS NULL OR tt.name IN
+            <foreach collection="transactionTypes" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="transactionPeriodIds != null and transactionPeriodIds.size() > 0">
+            AND (t.transaction_period_id IS NULL OR t.transaction_period_id IN
+            <foreach collection="transactionPeriodIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="transactionPeriods != null and transactionPeriods.size() > 0">
+            AND (tp.name IS NULL OR tp.name IN
+            <foreach collection="transactionPeriods" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+
+        <if test="contractStartDate != null and contractStartDate != ''">
+            AND (t.contract_start_date IS NULL OR t.contract_start_date >= #{contractStartDate})
+        </if>
+
+        <if test="contractEndDate != null and contractEndDate != ''">
+            AND (t.contract_end_date IS NULL OR t.contract_end_date &lt;= #{contractEndDate})
+        </if>
+
+        <if test="greenPowerList != null and greenPowerList.size() > 0">
+            AND (t.is_green IS NULL OR t.is_green IN
+            <foreach collection="greenPowerList" item="item" open="(" separator="," close=")">#{item}</foreach>)
+        </if>
+    </sql>
+
+    <!-- ===================================================== -->
+    <!-- 1. DETAIL QUERY                                       -->
+    <!-- ===================================================== -->
+
+    <select id="getLedgerDetail" resultType="com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerDTO">
+        SELECT
+            c.id AS companyId,
+            c.name AS companyName,
+
+            t.transaction_type_id AS transactionTypeId,
+            t.gen_type_id AS genTypeId,
+            t.transaction_period_id AS transactionPeriodId,
+            t.contract_start_date AS contractStartDate,
+            t.contract_end_date AS contractEndDate,
+            t.is_green AS isGreen,
+
+            t.chng_transaction_amount AS chngTransactionAmount,
+            t.chng_avg_price AS chngTradedPrice
+
+        FROM companies c
+        LEFT JOIN longterm_transactions t
+            ON c.id = t.company_id
+        LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
+        LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
+        LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
+
+        <include refid="BaseWhere"/>
+    </select>
+
+
+    <!-- ===================================================== -->
+    <!-- 2. PIVOT QUERY (BI MAIN TABLE)                        -->
+    <!-- ===================================================== -->
+
+    <select id="getLedgerPivot" resultType="com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerDTO">
+
+        SELECT
+            c.id AS companyId,
+            c.name AS companyName,
+
+            t.gen_type_id AS genTypeId,
+            t.transaction_type_id AS transactionTypeId,
+            t.transaction_period_id AS transactionPeriodId,
+            t.contract_start_date AS contractStartDate,
+            t.contract_end_date AS contractEndDate,
+            t.is_green AS isGreen,
+
+            COALESCE(SUM(t.chng_transaction_amount), 0) AS chngTransactionAmount,
+
+            COALESCE(
+                SUM(t.chng_transaction_amount * t.chng_avg_price)
+                / NULLIF(SUM(t.chng_transaction_amount), 0),
+                0
+            ) AS chngTradedPrice
+
+        FROM companies c
+        LEFT JOIN longterm_transactions t
+            ON c.id = t.company_id
+        LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
+        LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
+        LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
+
+        <include refid="BaseWhere"/>
+
+        GROUP BY
+            c.id,
+            c.name
+
+        ORDER BY c.id
+    </select>
+
+
+    <!-- ===================================================== -->
+    <!-- 3. SUMMARY QUERY                                     -->
+    <!-- ===================================================== -->
+
+    <select id="getLedgerSummary" resultType="com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerSummaryDTO">
+        SELECT
+            COALESCE(SUM(t.chng_transaction_amount),0) AS totalTradedPower,
+            COALESCE(
+                SUM(t.base_price * t.chng_transaction_amount)
+                / NULLIF(SUM(t.chng_transaction_amount),0),0
+            ) AS weightedBenchmarkPrice,
+            COALESCE(
+                SUM(t.chng_avg_price * t.chng_transaction_amount)
+                / NULLIF(SUM(t.chng_transaction_amount),0),0
+            ) AS chngTradedPrice,
+            COUNT(DISTINCT c.id) AS companyCount
+        FROM companies c
+        LEFT JOIN longterm_transactions t
+            ON c.id = t.company_id
+        LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
+        LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
+        LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
+
+        <include refid="BaseWhere"/>
+    </select>
+
+
+    <!-- ===================================================== -->
+    <!-- 4. TREND QUERY                                      -->
+    <!-- ===================================================== -->
+
+    <select id="getLedgerTrend" resultType="com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerTrendDTO">
+        SELECT
+            DATE_FORMAT(t.contract_start_date,'%Y-%m') AS period,
+            COALESCE(SUM(t.chng_transaction_amount),0) AS tradedPower,
+            COALESCE(
+                SUM(t.base_price * t.chng_transaction_amount)
+                / NULLIF(SUM(t.chng_transaction_amount),0),0
+            ) AS weightedBenchmarkPrice,
+            COALESCE(
+                SUM(t.chng_avg_price * t.chng_transaction_amount)
+                / NULLIF(SUM(t.chng_transaction_amount),0),0
+            ) AS chngTradedPrice
+        FROM companies c
+        LEFT JOIN longterm_transactions t ON c.id = t.company_id
+        LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
+        LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
+        LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
+
+        <include refid="BaseWhere"/>
+
+        GROUP BY DATE_FORMAT(t.contract_start_date,'%Y-%m')
+        ORDER BY DATE_FORMAT(t.contract_start_date,'%Y-%m')
+    </select>
+
+
+    <!-- ===================================================== -->
+    <!-- 5. FILTER OPTIONS (Individual Queries)               -->
+    <!-- ===================================================== -->
+
+    <select id="getTransactionTypes" resultType="java.lang.String">
+        SELECT DISTINCT tt.name
+        FROM longterm_transactions t
+        LEFT JOIN transaction_types tt ON tt.id = t.transaction_type_id
+        WHERE tt.name IS NOT NULL
+        ORDER BY tt.name
+    </select>
+
+    <select id="getGenTypes" resultType="java.lang.String">
+        SELECT DISTINCT gt.name
+        FROM longterm_transactions t
+        LEFT JOIN gen_types gt ON gt.id = t.gen_type_id
+        WHERE gt.name IS NOT NULL
+        ORDER BY gt.name
+    </select>
+
+    <select id="getTransactionPeriods" resultType="java.lang.String">
+        SELECT DISTINCT tp.name
+        FROM longterm_transactions t
+        LEFT JOIN transaction_periods tp ON tp.id = t.transaction_period_id
+        WHERE tp.name IS NOT NULL
+        ORDER BY tp.name
+    </select>
+
+    <select id="getGreenPowerOptions" resultType="java.lang.String">
+        SELECT DISTINCT CAST(is_green AS CHAR)
+        FROM longterm_transactions
+        ORDER BY is_green
+    </select>
+
+    <select id="getMinContractDate" resultType="java.lang.String">
+        SELECT DATE_FORMAT(MIN(contract_start_date),'%Y-%m-%d')
+        FROM longterm_transactions
+    </select>
+
+    <select id="getMaxContractDate" resultType="java.lang.String">
+        SELECT DATE_FORMAT(MAX(contract_end_date),'%Y-%m-%d')
+        FROM longterm_transactions
+    </select>
+
+</mapper>
