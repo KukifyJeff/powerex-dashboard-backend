@@ -49,16 +49,4 @@ public class LTLedgerDTO {
     private String note;
     private LocalDateTime createdAt;
 
-    // compatibility getters
-    public Double getTotalAmount() { return chngTransactionAmount == null ? null : chngTransactionAmount.doubleValue(); }
-    public Double getWeightedPrice() { return chngTradedPrice == null ? null : chngTradedPrice.doubleValue(); }
-    public String getTransactionType() { return transactionTypeName; }
-    public String getPowerType() { return genTypeName; }
-    public String getTransactionPeriod() { return transactionPeriodName; }
-    public String getContractPeriod() {
-        if (contractStartDate == null && contractEndDate == null) return null;
-        if (contractStartDate == null) return contractEndDate.toString();
-        if (contractEndDate == null) return contractStartDate.toString();
-        return contractStartDate.toString() + "~" + contractEndDate.toString();
-    }
 }
