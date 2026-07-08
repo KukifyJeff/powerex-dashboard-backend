@@ -24,21 +24,27 @@ public class PivotServices {
                     .map(LTLedgerDTO::getChngTransactionAmount)
                     .filter(Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal numerator = list.stream()
+            BigDecimal numeratorChng = list.stream()
                     .filter(d -> d.getChngTransactionAmount() != null && d.getChngTradedPrice() != null)
                     .map(d -> d.getChngTransactionAmount().multiply(d.getChngTradedPrice()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal numeratorBase = list.stream()
+                    .filter(d -> d.getChngTransactionAmount() != null && d.getBasePrice() != null)
+                    .map(d -> d.getChngTransactionAmount().multiply(d.getBasePrice()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal denom = list.stream()
                     .map(LTLedgerDTO::getChngTransactionAmount)
                     .filter(Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal avgPrice = denom.compareTo(BigDecimal.ZERO) == 0 ? BigDecimal.ZERO : numerator.divide(denom, 6, BigDecimal.ROUND_HALF_UP);
+            BigDecimal avgChngPrice = denom.compareTo(BigDecimal.ZERO) == 0 ? BigDecimal.ZERO : numeratorChng.divide(denom, 6, BigDecimal.ROUND_HALF_UP);
+            BigDecimal avgBenchmarkPrice = denom.compareTo(BigDecimal.ZERO) == 0 ? BigDecimal.ZERO : numeratorBase.divide(denom, 6, BigDecimal.ROUND_HALF_UP);
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("companyId", companyId);
             row.put("companyName", companyName);
             row.put("chngTransactionAmount", totalAmount);
-            row.put("chngTradedPrice", avgPrice);
+            row.put("chngTradedPrice", avgChngPrice);
+            row.put("weightedBenchmarkPrice", avgBenchmarkPrice);
             table.add(row);
         }
         // sort by companyId (nulls last)
