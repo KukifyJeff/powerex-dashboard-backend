@@ -13,7 +13,6 @@ public interface LTLedgerMapper {
 
     List<LTLedgerDTO> getLedgerPivot(
         @Param("genTypeIds") List<Integer> genTypeIds,
-        @Param("companyIds") List<Long> companyIds,
         @Param("transactionTypeIds") List<Integer> transactionTypeIds,
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
@@ -23,7 +22,6 @@ public interface LTLedgerMapper {
 
     List<LTLedgerDTO> getLedgerDetail(
         @Param("genTypeIds") List<Integer> genTypeIds,
-        @Param("companyIds") List<Long> companyIds,
         @Param("transactionTypeIds") List<Integer> transactionTypeIds,
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
@@ -33,7 +31,6 @@ public interface LTLedgerMapper {
 
     LTLedgerSummaryDTO getLedgerSummary(
         @Param("genTypeIds") List<Integer> genTypeIds,
-        @Param("companyIds") List<Long> companyIds,
         @Param("transactionTypeIds") List<Integer> transactionTypeIds,
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
@@ -43,7 +40,6 @@ public interface LTLedgerMapper {
 
     List<LTLedgerTrendDTO> getLedgerTrend(
         @Param("genTypeIds") List<Integer> genTypeIds,
-        @Param("companyIds") List<Long> companyIds,
         @Param("transactionTypeIds") List<Integer> transactionTypeIds,
         @Param("transactionPeriodIds") List<Integer> transactionPeriodIds,
         @Param("contractStartDate") String contractStartDate,
@@ -52,7 +48,6 @@ public interface LTLedgerMapper {
     );
 
     // helper: name -> id
-    List<Long> getCompanyIdsByNames(@Param("companyNames") List<String> companyNames);
     List<Integer> getGenTypeIdsByNames(@Param("genTypeNames") List<String> genTypeNames);
     List<Integer> getTransactionTypeIdsByNames(@Param("transactionTypes") List<String> transactionTypes);
     List<Integer> getTransactionPeriodIdsByNames(@Param("transactionPeriods") List<String> transactionPeriods);

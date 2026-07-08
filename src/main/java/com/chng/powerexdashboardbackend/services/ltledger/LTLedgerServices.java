@@ -26,14 +26,13 @@ public class LTLedgerServices {
 
     public LTLedgerResponse getPivot(LTLedgerQuery query) {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
-        List<Long> companyIds = resolveCompanyIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
         List<String> green = buildGreenList(query.getIsGreen());
 
-        List<LTLedgerDTO> rows = mapper.getLedgerPivot(genTypeIds, companyIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        List<LTLedgerDTO> rows = mapper.getLedgerPivot(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
         List<Map<String, Object>> table = pivotServices.buildPivot(rows);
 
         LTLedgerResponse resp = new LTLedgerResponse();
@@ -49,13 +48,12 @@ public class LTLedgerServices {
 
     public List<LTLedgerDTO> getDetail(LTLedgerQuery query) {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
-        List<Long> companyIds = resolveCompanyIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
         List<String> green = buildGreenList(query.getIsGreen());
-        return mapper.getLedgerDetail(genTypeIds, companyIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        return mapper.getLedgerDetail(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
     }
 
     public List<LTLedgerDTO> getLedger(LTLedgerQuery query) {
@@ -64,24 +62,22 @@ public class LTLedgerServices {
 
     public LTLedgerSummaryDTO getSummary(LTLedgerQuery query) {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
-        List<Long> companyIds = resolveCompanyIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
         List<String> green = buildGreenList(query.getIsGreen());
-        return mapper.getLedgerSummary(genTypeIds, companyIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        return mapper.getLedgerSummary(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
     }
 
     public List<LTLedgerTrendDTO> getTrend(LTLedgerQuery query) {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
-        List<Long> companyIds = resolveCompanyIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
         String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
         String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
         List<String> green = buildGreenList(query.getIsGreen());
-        return mapper.getLedgerTrend(genTypeIds, companyIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        return mapper.getLedgerTrend(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
     }
 
     public com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerFilterOptionsDTO getFilterOptions() {
@@ -103,13 +99,6 @@ public class LTLedgerServices {
     }
 
     // helpers: resolve names -> ids when names present
-    private List<Long> resolveCompanyIds(LTLedgerQuery q) {
-        if (q.getCompanyNames() != null && !q.getCompanyNames().isEmpty()) {
-            List<Long> ids = mapper.getCompanyIdsByNames(q.getCompanyNames());
-            return ids == null ? Collections.emptyList() : ids;
-        }
-        return q.getCompanyIds();
-    }
 
     private List<Integer> resolveGenTypeIds(LTLedgerQuery q) {
         if (q.getGenTypeNames() != null && !q.getGenTypeNames().isEmpty()) {

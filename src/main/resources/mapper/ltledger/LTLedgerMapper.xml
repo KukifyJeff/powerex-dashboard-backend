@@ -7,15 +7,6 @@
     <sql id="BaseWhere">
         WHERE 1=1
 
-        <if test="companyIds != null and companyIds.size() > 0">
-            AND (t.company_id IS NULL OR t.company_id IN
-            <foreach collection="companyIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
-        </if>
-
-        <if test="companyNames != null and companyNames.size() > 0">
-            AND (c.name IS NULL OR c.name IN
-            <foreach collection="companyNames" item="item" open="(" separator="," close=")">#{item}</foreach>)
-        </if>
 
         <if test="genTypeIds != null and genTypeIds.size() > 0">
             AND (t.gen_type_id IS NULL OR t.gen_type_id IN

@@ -6,9 +6,6 @@ import java.util.List;
 
 @Data
 public class LTLedgerQuery {
-    private List<Long> companyIds;
-    private List<String> companyNames;
-
     private List<Integer> genTypeIds;
     private List<String> genTypeNames;
 
