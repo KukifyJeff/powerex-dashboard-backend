@@ -11,12 +11,14 @@ import java.util.stream.Collectors;
 public class PivotServices {
 
     public List<Map<String, Object>> buildPivot(List<LTLedgerDTO> rows) {
-        // Simple pivot: group by company name, sum totalAmount and weightedPrice (average weighted)
-        Map<String, List<LTLedgerDTO>> byCompany = rows.stream().collect(Collectors.groupingBy(LTLedgerDTO::getCompanyName));
+        // Group by companyId to preserve id and name
+        Map<Long, List<LTLedgerDTO>> byCompany = rows.stream().collect(Collectors.groupingBy(LTLedgerDTO::getCompanyId));
         List<Map<String, Object>> table = new ArrayList<>();
-        for (Map.Entry<String, List<LTLedgerDTO>> e : byCompany.entrySet()) {
-            String company = e.getKey();
+        for (Map.Entry<Long, List<LTLedgerDTO>> e : byCompany.entrySet()) {
+            Long companyId = e.getKey();
             List<LTLedgerDTO> list = e.getValue();
+            String companyName = list.stream().map(LTLedgerDTO::getCompanyName).filter(Objects::nonNull).findFirst().orElse(null);
+
             // aggregate using BigDecimal fields directly
             BigDecimal totalAmount = list.stream()
                     .map(LTLedgerDTO::getChngTransactionAmount)
@@ -31,14 +33,19 @@ public class PivotServices {
                     .filter(Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal avgPrice = denom.compareTo(BigDecimal.ZERO) == 0 ? BigDecimal.ZERO : numerator.divide(denom, 6, BigDecimal.ROUND_HALF_UP);
+
             Map<String, Object> row = new LinkedHashMap<>();
-            row.put("companyName", company);
-            row.put("totalAmount", totalAmount);
-            row.put("weightedPrice", avgPrice);
+            row.put("companyId", companyId);
+            row.put("companyName", companyName);
+            row.put("chngTransactionAmount", totalAmount);
+            row.put("chngTradedPrice", avgPrice);
             table.add(row);
         }
-        // sort by companyName
-        table.sort(Comparator.comparing(m -> (String) m.get("companyName")));
+        // sort by companyId (nulls last)
+        table.sort(Comparator.comparingLong(m -> {
+            Object v = m.get("companyId");
+            return v == null ? Long.MAX_VALUE : ((Number) v).longValue();
+        }));
         return table;
     }
 }
