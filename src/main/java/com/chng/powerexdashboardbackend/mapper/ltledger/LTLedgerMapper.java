@@ -48,9 +48,6 @@ public interface LTLedgerMapper {
     );
 
     // helper: name -> id
-    List<Integer> getGenTypeIdsByNames(@Param("genTypeNames") List<String> genTypeNames);
-    List<Integer> getTransactionTypeIdsByNames(@Param("transactionTypes") List<String> transactionTypes);
-    List<Integer> getTransactionPeriodIdsByNames(@Param("transactionPeriods") List<String> transactionPeriods);
 
     // filter options
     List<String> getTransactionTypes();

@@ -13,30 +13,18 @@
             <foreach collection="genTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
         </if>
 
-        <if test="genTypeNames != null and genTypeNames.size() > 0">
-            AND (gt.name IS NULL OR gt.name IN
-            <foreach collection="genTypeNames" item="item" open="(" separator="," close=")">#{item}</foreach>)
-        </if>
 
         <if test="transactionTypeIds != null and transactionTypeIds.size() > 0">
             AND (t.transaction_type_id IS NULL OR t.transaction_type_id IN
             <foreach collection="transactionTypeIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
         </if>
 
-        <if test="transactionTypes != null and transactionTypes.size() > 0">
-            AND (tt.name IS NULL OR tt.name IN
-            <foreach collection="transactionTypes" item="item" open="(" separator="," close=")">#{item}</foreach>)
-        </if>
 
         <if test="transactionPeriodIds != null and transactionPeriodIds.size() > 0">
             AND (t.transaction_period_id IS NULL OR t.transaction_period_id IN
             <foreach collection="transactionPeriodIds" item="item" open="(" separator="," close=")">#{item}</foreach>)
         </if>
 
-        <if test="transactionPeriods != null and transactionPeriods.size() > 0">
-            AND (tp.name IS NULL OR tp.name IN
-            <foreach collection="transactionPeriods" item="item" open="(" separator="," close=")">#{item}</foreach>)
-        </if>
 
         <if test="contractStartDate != null and contractStartDate != ''">
             AND (t.contract_start_date IS NULL OR t.contract_start_date >= #{contractStartDate})

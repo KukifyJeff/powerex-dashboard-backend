@@ -101,26 +101,14 @@ public class LTLedgerServices {
     // helpers: resolve names -> ids when names present
 
     private List<Integer> resolveGenTypeIds(LTLedgerQuery q) {
-        if (q.getGenTypeNames() != null && !q.getGenTypeNames().isEmpty()) {
-            List<Integer> ids = mapper.getGenTypeIdsByNames(q.getGenTypeNames());
-            return ids == null ? Collections.emptyList() : ids;
-        }
         return q.getGenTypeIds();
     }
 
     private List<Integer> resolveTransactionTypeIds(LTLedgerQuery q) {
-        if (q.getTransactionTypes() != null && !q.getTransactionTypes().isEmpty()) {
-            List<Integer> ids = mapper.getTransactionTypeIdsByNames(q.getTransactionTypes());
-            return ids == null ? Collections.emptyList() : ids;
-        }
         return q.getTransactionTypeIds();
     }
 
     private List<Integer> resolveTransactionPeriodIds(LTLedgerQuery q) {
-        if (q.getTransactionPeriodNames() != null && !q.getTransactionPeriodNames().isEmpty()) {
-            List<Integer> ids = mapper.getTransactionPeriodIdsByNames(q.getTransactionPeriodNames());
-            return ids == null ? Collections.emptyList() : ids;
-        }
         return q.getTransactionPeriodIds();
     }
 
