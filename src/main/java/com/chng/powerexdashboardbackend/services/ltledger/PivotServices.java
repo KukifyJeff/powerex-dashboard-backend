@@ -28,16 +28,10 @@ public class PivotServices {
                     .filter(d -> d.getChngTransactionAmount() != null && d.getChngTradedPrice() != null)
                     .map(d -> d.getChngTransactionAmount().multiply(d.getChngTradedPrice()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            // For benchmark (base) price, fall back to marketAvgPrice, then to chngTradedPrice if basePrice is missing
+            // For benchmark (base) price, use basePrice only (align with app.py logic), ignore marketAvgPrice/chngTradedPrice
             BigDecimal numeratorBase = list.stream()
-                    .map(d -> {
-                        if (d.getChngTransactionAmount() == null) return BigDecimal.ZERO;
-                        BigDecimal amt = d.getChngTransactionAmount();
-                        BigDecimal price = d.getBasePrice();
-                        if (price == null) price = d.getMarketAvgPrice();
-                        if (price == null) price = d.getChngTradedPrice();
-                        return price == null ? BigDecimal.ZERO : amt.multiply(price);
-                    })
+                    .filter(d -> d.getChngTransactionAmount() != null && d.getBasePrice() != null)
+                    .map(d -> d.getChngTransactionAmount().multiply(d.getBasePrice()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal denom = list.stream()
                     .map(LTLedgerDTO::getChngTransactionAmount)

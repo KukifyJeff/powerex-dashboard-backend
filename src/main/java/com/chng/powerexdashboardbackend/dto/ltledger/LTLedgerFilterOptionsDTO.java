@@ -6,10 +6,10 @@ import java.time.LocalDate;
 
 @Data
 public class LTLedgerFilterOptionsDTO {
-    private List<String> transactionTypes;
-    private List<String> genTypes;
-    private List<String> transactionPeriods;
-    private List<String> greenPowerOptions;
+    private List<Integer> transactionTypeIds;
+    private List<Integer> genTypeIds;
+    private List<Integer> transactionPeriodIds;
+    private List<Integer> greenPowerOptions;
     private LocalDate minContractDate;
     private LocalDate maxContractDate;
 }

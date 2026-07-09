@@ -1,6 +1,5 @@
 package com.chng.powerexdashboardbackend.responses.ltledger;
 
-import com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerDTO;
 import lombok.Data;
 
 import java.util.List;
@@ -9,7 +8,6 @@ import java.util.Map;
 @Data
 public class LTLedgerResponse {
     private List<Map<String, Object>> table;
-    private List<LTLedgerDTO> raw;
     private FilterOptions filters;
     private Meta meta;
 
