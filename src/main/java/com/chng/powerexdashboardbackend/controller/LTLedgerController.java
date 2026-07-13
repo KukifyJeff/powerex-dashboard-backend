@@ -4,13 +4,19 @@ import com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerDTO;
 import com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerFilterOptionsDTO;
 import com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerSummaryDTO;
 import com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerTrendDTO;
+import com.chng.powerexdashboardbackend.request.LTLedgerCompareExportRequest;
 import com.chng.powerexdashboardbackend.request.LTLedgerOptionsQuery;
 import com.chng.powerexdashboardbackend.request.LTLedgerQuery;
 import com.chng.powerexdashboardbackend.services.ltledger.LTLedgerServices;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -47,5 +53,28 @@ public class LTLedgerController {
     @PostMapping("/trend")
     public List<LTLedgerTrendDTO> getTrend(@RequestBody LTLedgerQuery query) {
         return ltLedgerServices.getTrend(query);
+    }
+
+    @PostMapping("/export")
+    public ResponseEntity<byte[]> exportPivot(@RequestBody(required = false) LTLedgerQuery query) {
+        byte[] csv = ltLedgerServices.exportPivotCsv(query);
+        String fileName = "lt-ledger-pivot.csv";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(csv);
+    }
+
+    @PostMapping("/export/compare")
+    public ResponseEntity<byte[]> exportCompare(@RequestBody LTLedgerCompareExportRequest request) {
+        try {
+            byte[] csv = ltLedgerServices.exportComparePivotCsv(request);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"lt-ledger-pivot-compare.csv\"")
+                    .body(csv);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
     }
 }

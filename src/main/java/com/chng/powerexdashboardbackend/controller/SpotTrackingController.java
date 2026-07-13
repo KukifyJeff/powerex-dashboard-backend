@@ -3,7 +3,10 @@ package com.chng.powerexdashboardbackend.controller;
 import com.chng.powerexdashboardbackend.responses.spottracking.*;
 import com.chng.powerexdashboardbackend.services.SpotTrackingServices;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,9 +27,10 @@ public class SpotTrackingController {
     public List<SpotDataResponse> spot(
             @RequestParam Integer genTypeId,
             @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate) {
+            @RequestParam(required = false) String endDate,
+            @RequestParam(defaultValue = "false") boolean includeTotal) {
         DateRange range = resolveDateRange(startDate, endDate);
-        return service.getSpotSummary(genTypeId, range.startDate(), range.endDate());
+        return service.getSpotSummary(genTypeId, range.startDate(), range.endDate(), includeTotal);
     }
 
     // ========================= TAB2 =========================
@@ -54,13 +58,34 @@ public class SpotTrackingController {
     public List<SpotTrackingSummaryResponse> summary(
             @RequestParam Integer genTypeId,
             @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate) {
+            @RequestParam(required = false) String endDate,
+            @RequestParam(defaultValue = "false") boolean includeTotal) {
         DateRange range = resolveDateRange(startDate, endDate);
-        return service.getFinalSummary(genTypeId, range.startDate(), range.endDate());
+        return service.getFinalSummary(genTypeId, range.startDate(), range.endDate(), includeTotal);
     }
     @GetMapping("/contract-years")
     public List<Integer> getContractYears() {
         return service.getContractYears();
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> export(
+            @RequestParam Integer genTypeId,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(defaultValue = "spot") String table) {
+        DateRange range = resolveDateRange(startDate, endDate);
+        byte[] csv;
+        try {
+            csv = service.exportCsv(table, genTypeId, range.startDate(), range.endDate());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+        String fileName = "spot-tracking-" + table + ".csv";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(csv);
     }
 
     private DateRange resolveDateRange(String startDate,
