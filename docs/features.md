@@ -57,3 +57,43 @@
 3. 前端接合计行和下载按钮。
 4. 后端补周报图接口。
 5. 前端完成图表页与联调验收。
+
+---
+
+## 4. ImportData（批量导入 + 版本回滚）
+
+### 4.1 功能目标
+- 支持前端一次上传多个 Excel（`.xlsx/.xls`）。
+- 后端按 `docs/db_migrate_all.py` 的核心规则做规范化（列映射、日期/周期、百分比、空值、字典映射）。
+- 上传后先进入导入任务（job）与 staging，不直接污染线上表。
+- 仅在管理员密码确认后发布为新版本并覆盖线上数据。
+- 支持版本列表查询与一键回滚到任意历史版本。
+
+### 4.2 后端接口
+- `POST /api/import-data/upload/longterm`（multipart，`files[]`）
+- `POST /api/import-data/upload/spot`（multipart，`files[]`）
+- `GET /api/import-data/jobs/{jobId}`
+- `POST /api/import-data/confirm`
+- `GET /api/import-data/versions`
+- `GET /api/import-data/restore-points`
+- `POST /api/import-data/rollback`
+- `POST /api/import-data/rollback/recent`
+
+### 4.3 数据版本策略
+- 新增导入任务表、文件明细表、staging 表。
+- 新增版本主表与版本快照表（中长期/现货）。
+- 新增恢复点表，记录发布/回滚前后的 MySQL binlog 位点。
+- 发布时：staging -> snapshot -> 覆盖 live 表，并标记 active 版本。
+- 回滚时：按版本快照重建 live 表并切换 active 标记。
+
+### 4.4 PITR 兜底策略（mysqlbinlog）
+- 每次发布/回滚自动记录 `SHOW MASTER STATUS`（binlog file/position）。
+- 运维可配合全量备份 + `mysqlbinlog` 按位点回放做时间点恢复。
+- 参考脚本：
+  - `scripts/db/create-full-backup.sh`
+  - `scripts/db/pitr-recover.sh`
+
+### 4.5 配置项
+- `app.import-data.admin-password-hash`
+  - 从环境变量 `IMPORT_DATA_ADMIN_PASSWORD_HASH` 注入
+  - 必须是 BCrypt 哈希值

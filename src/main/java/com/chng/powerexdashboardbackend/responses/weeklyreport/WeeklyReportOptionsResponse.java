@@ -1,11 +1,11 @@
-package com.chng.powerexdashboardbackend.dto.weeklyreport;
+package com.chng.powerexdashboardbackend.responses.weeklyreport;
 
 import lombok.Data;
 
 import java.util.List;
 
 @Data
-public class ProvincialSpotTrendOptionsDTO {
+public class WeeklyReportOptionsResponse {
     private String maxWeekKey;
     private List<String> weekOptions;
 }

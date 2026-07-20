@@ -2,18 +2,20 @@ package com.chng.powerexdashboardbackend.services;
 
 import com.chng.powerexdashboardbackend.dto.weeklyreport.ChartSeriesDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.CompanyDailyPriceDTO;
-import com.chng.powerexdashboardbackend.dto.weeklyreport.CompanyPriceTrendResponseDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.CompanyPriceTrendWeekDTO;
-import com.chng.powerexdashboardbackend.dto.weeklyreport.LongtermAmountPriceTrendResponseDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.RegionalCompanyDailySpotPriceDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotCompanyDailyDTO;
-import com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotTrendOptionsDTO;
-import com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotTrendResponseDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotTrendWeekDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.LongtermAmountPriceTrendDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.RegionalSpotTrendCompanyDTO;
-import com.chng.powerexdashboardbackend.dto.weeklyreport.RegionalSpotTrendResponseDTO;
 import com.chng.powerexdashboardbackend.dto.weeklyreport.RegionalSpotTrendWeekDTO;
+import com.chng.powerexdashboardbackend.request.weeklyreport.WeeklyReportChartExportItem;
+import com.chng.powerexdashboardbackend.request.weeklyreport.WeeklyReportChartsExportRequest;
+import com.chng.powerexdashboardbackend.responses.weeklyreport.CompanyPriceTrendResponse;
+import com.chng.powerexdashboardbackend.responses.weeklyreport.LongtermAmountPriceTrendResponse;
+import com.chng.powerexdashboardbackend.responses.weeklyreport.WeeklyReportOptionsResponse;
+import com.chng.powerexdashboardbackend.responses.weeklyreport.ProvincialSpotTrendResponse;
+import com.chng.powerexdashboardbackend.responses.weeklyreport.RegionalSpotTrendResponse;
 import com.chng.powerexdashboardbackend.mapper.weeklyreport.WeeklyReportMapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
@@ -24,6 +26,7 @@ import org.springframework.http.HttpStatus;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,32 +37,82 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Base64;
+import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.awt.image.BufferedImage;
+import java.awt.Graphics2D;
+import javax.imageio.ImageIO;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 @RequiredArgsConstructor
 public class WeeklyReportServices {
 
     private static final int RECENT_WEEK_COUNT = 10;
+    private static final int EXPORT_CHART_COUNT = 9;
+    private static final DateTimeFormatter EXPORT_DATE_FORMATTER = DateTimeFormatter.BASIC_ISO_DATE;
+    private static final List<String> EXPORT_CHART_FILE_BASE_NAMES = List.of(
+            "2026年省级现货实时均价走势",
+            "公司日清分电能量电价走势",
+            "中长期交易量价走势",
+            "东北区域现货实时均价走势",
+            "西北区域现货实时均价走势",
+            "华北区域现货实时均价走势",
+            "华中区域现货实时均价走势",
+            "华东区域现货实时均价走势",
+            "南方区域现货实时均价走势"
+    );
     private final WeeklyReportMapper weeklyReportMapper;
 
-    public ProvincialSpotTrendOptionsDTO getProvincialSpotTrendOptions() {
+    public WeeklyReportOptionsResponse getWeeklyReportOptionsResponse() {
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
-        ProvincialSpotTrendOptionsDTO response = new ProvincialSpotTrendOptionsDTO();
+        WeeklyReportOptionsResponse response = new WeeklyReportOptionsResponse();
         if (latestDate == null) {
             response.setMaxWeekKey(null);
             response.setWeekOptions(new ArrayList<>());
             return response;
         }
-
         WeekTimeline timeline = buildWeekTimeline(latestDate);
         response.setMaxWeekKey(timeline.maxWeekKey());
         response.setWeekOptions(timeline.weekKeys());
         return response;
     }
 
-    public ProvincialSpotTrendResponseDTO getProvincialSpotTrend(String lastDataWeekKey) {
+    public WeeklyReportChartsZipResult exportWeeklyReportChartsZip(WeeklyReportChartsExportRequest request) {
+        if (request == null || request.getCharts() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "charts is required");
+        }
+        if (request.getCharts().size() != EXPORT_CHART_COUNT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "charts size must be " + EXPORT_CHART_COUNT);
+        }
+        WeekWindow selectedWindow = resolveSelectedWeekWindow(request.getLastDataWeekKey());
+        String suffixDate = selectedWindow.endDate().format(EXPORT_DATE_FORMATTER);
+        String zipFileName = "周报用图-" + suffixDate + ".zip";
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
+            for (int i = 0; i < request.getCharts().size(); i++) {
+                WeeklyReportChartExportItem chart = request.getCharts().get(i);
+                if (chart == null || chart.getImageBase64() == null || chart.getImageBase64().isBlank()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "imageBase64 is required for every chart");
+                }
+                byte[] jpgBytes = convertToJpgBytes(chart.getImageBase64());
+                String fileName = buildExportImageFileName(i, suffixDate);
+                zipOutputStream.putNextEntry(new ZipEntry(fileName));
+                zipOutputStream.write(jpgBytes);
+                zipOutputStream.closeEntry();
+            }
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to generate weekly-report zip", ex);
+        }
+        return new WeeklyReportChartsZipResult(zipFileName, outputStream.toByteArray());
+    }
+
+    public ProvincialSpotTrendResponse getProvincialSpotTrend(String lastDataWeekKey) {
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
-        ProvincialSpotTrendResponseDTO response = new ProvincialSpotTrendResponseDTO();
+        ProvincialSpotTrendResponse response = new ProvincialSpotTrendResponse();
         response.setUnit("元/MWh");
         response.setWeekRule("周六到下周五");
         response.setSeries(new ArrayList<>());
@@ -166,9 +219,9 @@ public class WeeklyReportServices {
         return response;
     }
 
-    public CompanyPriceTrendResponseDTO getCompanyPriceTrend(String lastDataWeekKey) {
+    public CompanyPriceTrendResponse getCompanyPriceTrend(String lastDataWeekKey) {
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
-        CompanyPriceTrendResponseDTO response = new CompanyPriceTrendResponseDTO();
+        CompanyPriceTrendResponse response = new CompanyPriceTrendResponse();
         response.setUnit("元/MWh");
         response.setWeekRule("周六到下周五");
         response.setSeries(new ArrayList<>());
@@ -261,9 +314,9 @@ public class WeeklyReportServices {
         return response;
     }
 
-    public LongtermAmountPriceTrendResponseDTO getLongtermAmountPriceTrend(String lastDataWeekKey) {
+    public LongtermAmountPriceTrendResponse getLongtermAmountPriceTrend(String lastDataWeekKey) {
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
-        LongtermAmountPriceTrendResponseDTO response = new LongtermAmountPriceTrendResponseDTO();
+        LongtermAmountPriceTrendResponse response = new LongtermAmountPriceTrendResponse();
         response.setUnitAmount("亿千瓦时");
         response.setUnitPrice("元/MWh");
         response.setSeries(new ArrayList<>());
@@ -364,12 +417,12 @@ public class WeeklyReportServices {
         return response;
     }
 
-    public RegionalSpotTrendResponseDTO getRegionalSpotTrend(Integer regionId, String lastDataWeekKey) {
+    public RegionalSpotTrendResponse getRegionalSpotTrend(Integer regionId, String lastDataWeekKey) {
         if (regionId == null || regionId < 1 || regionId > 7 || regionId == 8) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid regionId: " + regionId);
         }
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
-        RegionalSpotTrendResponseDTO response = new RegionalSpotTrendResponseDTO();
+        RegionalSpotTrendResponse response = new RegionalSpotTrendResponse();
         response.setUnit("元/MWh");
         response.setWeekRule("周六到下周五");
         response.setSeries(new ArrayList<>());
@@ -623,6 +676,70 @@ public class WeeklyReportServices {
         };
     }
 
+    private WeekWindow resolveSelectedWeekWindow(String lastDataWeekKey) {
+        LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
+        if (latestDate == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No available weekly-report data");
+        }
+        WeekTimeline timeline = buildWeekTimeline(latestDate);
+        if (timeline.weekKeys().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No complete week available");
+        }
+        String selectedWeekKey = lastDataWeekKey == null || lastDataWeekKey.isBlank()
+                ? timeline.maxWeekKey()
+                : lastDataWeekKey.trim().toUpperCase(Locale.ROOT);
+        WeekWindow selectedWindow = timeline.weekWindowByKey().get(selectedWeekKey);
+        if (selectedWindow == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lastDataWeekKey: " + selectedWeekKey);
+        }
+        return selectedWindow;
+    }
+
+    private String buildExportImageFileName(int index, String suffixDate) {
+        return EXPORT_CHART_FILE_BASE_NAMES.get(index) + "-" + suffixDate + ".jpg";
+    }
+
+    private byte[] convertToJpgBytes(String imageBase64) {
+        byte[] original = decodeBase64Image(imageBase64);
+        BufferedImage inputImage;
+        try {
+            inputImage = ImageIO.read(new ByteArrayInputStream(original));
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid imageBase64");
+        }
+        if (inputImage == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid imageBase64");
+        }
+        BufferedImage rgbImage = new BufferedImage(inputImage.getWidth(), inputImage.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = rgbImage.createGraphics();
+        graphics.drawImage(inputImage, 0, 0, null);
+        graphics.dispose();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try {
+            boolean ok = ImageIO.write(rgbImage, "jpg", output);
+            if (!ok) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid image format");
+            }
+            return output.toByteArray();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to convert image", ex);
+        }
+    }
+
+    private byte[] decodeBase64Image(String base64Image) {
+        String payload = base64Image.trim();
+        int commaIndex = payload.indexOf(',');
+        if (payload.startsWith("data:") && commaIndex > -1) {
+            payload = payload.substring(commaIndex + 1);
+        }
+        try {
+            return Base64.getDecoder().decode(payload);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid imageBase64");
+        }
+    }
+
     private WeekTimeline buildWeekTimeline(LocalDate latestDate) {
         LocalDate firstWeekStart = firstWeekStartOfYear(latestDate.getYear());
         LocalDate latestWeekStart = latestDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.SATURDAY));
@@ -669,4 +786,6 @@ public class WeeklyReportServices {
             return year + "W" + weekNumber;
         }
     }
+
+    public record WeeklyReportChartsZipResult(String fileName, byte[] content) {}
 }

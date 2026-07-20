@@ -1,4 +1,4 @@
-package com.chng.powerexdashboardbackend.request;
+package com.chng.powerexdashboardbackend.request.ltledger;
 
 import lombok.Data;
 

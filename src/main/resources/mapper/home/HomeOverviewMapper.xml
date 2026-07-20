@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.chng.powerexdashboardbackend.mapper.home.HomeOverviewMapper">
+
+    <select id="getLatestSpotDate" resultType="java.time.LocalDate">
+        SELECT MAX(t.date)
+        FROM spot_transactions t
+        WHERE t.date &lt;= #{asOfDate}
+          AND (
+              t.spot_price IS NOT NULL
+              OR t.chng_spot_price IS NOT NULL
+              OR t.gen_amount IS NOT NULL
+          )
+    </select>
+
+    <select id="getLatestLongtermPeriod" resultType="java.lang.String">
+        SELECT DATE_FORMAT(MAX(t.contract_start_date), '%Y-%m')
+        FROM longterm_transactions t
+        WHERE t.contract_start_date &lt;= #{asOfDate}
+    </select>
+
+    <select id="getSpotAssetStats" resultType="com.chng.powerexdashboardbackend.dto.home.HomeSpotAssetStatDTO">
+        SELECT
+            t.gen_type_id AS genTypeId,
+            MIN(t.date) AS minDate,
+            MAX(t.date) AS maxDate,
+            COUNT(1) AS recordCount
+        FROM spot_transactions t
+        WHERE t.date &lt;= #{asOfDate}
+          AND t.gen_type_id IN (1, 2, 3)
+        GROUP BY t.gen_type_id
+    </select>
+
+    <select id="getLongtermAssetStat" resultType="com.chng.powerexdashboardbackend.dto.home.HomeLongtermAssetStatDTO">
+        SELECT
+            DATE_FORMAT(MIN(t.contract_start_date), '%Y-%m') AS minPeriod,
+            DATE_FORMAT(MAX(t.contract_start_date), '%Y-%m') AS maxPeriod,
+            COUNT(1) AS recordCount
+        FROM longterm_transactions t
+        WHERE t.contract_start_date &lt;= #{asOfDate}
+    </select>
+
+    <select id="countTotalSpotRecords" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM spot_transactions t
+        WHERE t.date &lt;= #{asOfDate}
+    </select>
+
+    <select id="countTotalLongtermRecords" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM longterm_transactions t
+        WHERE t.contract_start_date &lt;= #{asOfDate}
+    </select>
+
+    <select id="getAverageSpotPrice30d" resultType="java.math.BigDecimal">
+        SELECT AVG(t.spot_price)
+        FROM spot_transactions t
+        WHERE t.date BETWEEN #{startDate} AND #{endDate}
+          AND t.spot_price IS NOT NULL
+    </select>
+
+    <select id="getMaxChngSpotPrice30d" resultType="com.chng.powerexdashboardbackend.dto.home.HomePriceExtremeDTO">
+        SELECT
+            t.chng_spot_price AS price,
+            c.name AS companyName,
+            t.gen_type_id AS genTypeId,
+            t.date AS priceDate
+        FROM spot_transactions t
+        JOIN companies c ON c.id = t.company_id
+        WHERE t.date BETWEEN #{startDate} AND #{endDate}
+          AND t.chng_spot_price IS NOT NULL
+        ORDER BY t.chng_spot_price DESC
+        LIMIT 1
+    </select>
+
+    <select id="getMinChngSpotPrice30d" resultType="com.chng.powerexdashboardbackend.dto.home.HomePriceExtremeDTO">
+        SELECT
+            t.chng_spot_price AS price,
+            c.name AS companyName,
+            t.gen_type_id AS genTypeId,
+            t.date AS priceDate
+        FROM spot_transactions t
+        JOIN companies c ON c.id = t.company_id
+        WHERE t.date BETWEEN #{startDate} AND #{endDate}
+          AND t.chng_spot_price IS NOT NULL
+        ORDER BY t.chng_spot_price ASC
+        LIMIT 1
+    </select>
+
+    <select id="countDistinctSpotDays" resultType="java.lang.Integer">
+        SELECT COUNT(DISTINCT t.date)
+        FROM spot_transactions t
+        WHERE t.date BETWEEN #{startDate} AND #{endDate}
+          AND (
+              t.spot_price IS NOT NULL
+              OR t.chng_spot_price IS NOT NULL
+          )
+    </select>
+
+    <select id="countMissingSpotRecords" resultType="java.lang.Integer">
+        SELECT COUNT(1)
+        FROM spot_transactions t
+        WHERE t.date BETWEEN #{startDate} AND #{endDate}
+          AND (
+              t.spot_price IS NULL
+              OR t.chng_spot_price IS NULL
+          )
+    </select>
+
+    <select id="getRecentSpotImports" resultType="com.chng.powerexdashboardbackend.dto.home.HomeImportSnapshotDTO">
+        SELECT
+            '现货市场' AS type,
+            t.date AS importDate,
+            COUNT(1) AS added
+        FROM spot_transactions t
+        WHERE t.date &lt;= #{asOfDate}
+        GROUP BY t.date
+        ORDER BY t.date DESC
+        LIMIT 3
+    </select>
+
+    <select id="getRecentLongtermImports" resultType="com.chng.powerexdashboardbackend.dto.home.HomeImportSnapshotDTO">
+        SELECT
+            '中长期市场' AS type,
+            COALESCE(t.transaction_date, t.contract_start_date) AS importDate,
+            COUNT(1) AS added
+        FROM longterm_transactions t
+        WHERE COALESCE(t.transaction_date, t.contract_start_date) &lt;= #{asOfDate}
+        GROUP BY COALESCE(t.transaction_date, t.contract_start_date)
+        ORDER BY importDate DESC
+        LIMIT 2
+    </select>
+</mapper>

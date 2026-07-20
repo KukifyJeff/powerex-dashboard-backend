@@ -1,11 +1,13 @@
-package com.chng.powerexdashboardbackend.dto.weeklyreport;
+package com.chng.powerexdashboardbackend.responses.weeklyreport;
 
+import com.chng.powerexdashboardbackend.dto.weeklyreport.ChartSeriesDTO;
+import com.chng.powerexdashboardbackend.dto.weeklyreport.LongtermAmountPriceTrendDTO;
 import lombok.Data;
 
 import java.util.List;
 
 @Data
-public class LongtermAmountPriceTrendResponseDTO {
+public class LongtermAmountPriceTrendResponse {
     private String unitAmount;
     private String unitPrice;
     private String maxWeekKey;

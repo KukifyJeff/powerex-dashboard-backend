@@ -45,30 +45,6 @@
           )
     </select>
 
-    <select id="getProvincialDailyMarketAvgPrices" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotDailyPriceDTO">
-        SELECT
-            t.date AS priceDate,
-            COALESCE(
-                (
-                    AVG(t.spot_price) +
-                    AVG(
-                        CASE
-                            WHEN t.gen_type_id = 3 AND c.name NOT IN ('天津', '北京', '雅江', '新能源')
-                            THEN t.spot_price
-                            ELSE NULL
-                        END
-                    )
-                ) / 2,
-                AVG(t.spot_price),
-                0
-            ) AS marketAvgPrice
-        FROM spot_transactions t
-        JOIN companies c ON c.id = t.company_id
-        WHERE t.date BETWEEN #{startDate} AND #{endDate}
-        GROUP BY t.date
-        ORDER BY t.date
-    </select>
-
     <select id="getProvincialCompanyDailyPrices" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotCompanyDailyDTO">
         SELECT
             t.date AS priceDate,
@@ -88,60 +64,6 @@
         WHERE t.date BETWEEN #{startDate} AND #{endDate}
         GROUP BY t.date, c.id, c.name
         ORDER BY t.date, c.id
-    </select>
-
-    <select id="getProvincialWeeklyTrend" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialWeeklyTrendDTO">
-        SELECT
-            DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY) AS weekStartDate,
-            DATE_ADD(DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY), INTERVAL 6 DAY) AS weekEndDate,
-            COALESCE(
-                (
-                    AVG(t.spot_price) +
-                    AVG(
-                        CASE
-                            WHEN t.gen_type_id = 3 AND c.name NOT IN ('天津', '北京', '雅江', '新能源')
-                            THEN t.spot_price
-                            ELSE NULL
-                        END
-                    )
-                ) / 2,
-                AVG(t.spot_price),
-                0
-            ) AS marketAvgPrice,
-            COALESCE(SUM(t.longterm_amount * t.longterm_price) / NULLIF(SUM(t.longterm_amount), 0), 0) AS contractAvgPrice,
-            COALESCE(SUM(t.gen_amount * t.chng_spot_price) / NULLIF(SUM(t.gen_amount), 0), 0) AS chngAvgPrice
-        FROM spot_transactions t
-        JOIN companies c ON c.id = t.company_id
-        WHERE t.date BETWEEN #{startDate} AND #{endDate}
-        GROUP BY DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY)
-        ORDER BY weekStartDate
-    </select>
-
-    <select id="getCompanyWeeklyPriceTrend" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.CompanyPriceTrendDTO">
-        SELECT
-            DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY) AS weekStartDate,
-            DATE_ADD(DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY), INTERVAL 6 DAY) AS weekEndDate,
-            COALESCE(AVG(t.spot_price), 0) AS marketAvgPrice,
-            COALESCE(
-                SUM(CASE WHEN t.gen_type_id = 1 THEN t.gen_amount * t.chng_spot_price ELSE 0 END)
-                / NULLIF(SUM(CASE WHEN t.gen_type_id = 1 THEN t.gen_amount ELSE 0 END), 0),
-                0
-            ) AS coalChngPrice,
-            COALESCE(
-                SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount * t.chng_spot_price ELSE 0 END)
-                / NULLIF(SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount ELSE 0 END), 0),
-                0
-            ) AS windChngPrice,
-            COALESCE(
-                SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount * t.spot_price ELSE 0 END)
-                / NULLIF(SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount ELSE 0 END), 0),
-                0
-            ) AS windSpotAvgPrice
-        FROM spot_transactions t
-        WHERE t.company_id = #{companyId}
-          AND t.date BETWEEN #{startDate} AND #{endDate}
-        GROUP BY DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY)
-        ORDER BY weekStartDate
     </select>
 
     <select id="getCompanyDailyPriceTrend" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.CompanyDailyPriceDTO">
@@ -277,36 +199,6 @@
           AND t.gen_type_id IN (1, 2, 3)
         GROUP BY DATE_FORMAT(t.contract_start_date, '%Y-%m')
         ORDER BY DATE_FORMAT(t.contract_start_date, '%Y-%m')
-    </select>
-
-    <select id="getRegionalWeeklyTrendNational" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.RegionalWeeklyTrendDTO">
-        SELECT
-            <include refid="RegionNameByCompanyName"/> AS dimensionName,
-            DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY) AS weekStartDate,
-            DATE_ADD(DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY), INTERVAL 6 DAY) AS weekEndDate,
-            COALESCE(AVG(t.spot_price), 0) AS avgSpotPrice
-        FROM spot_transactions t
-        JOIN companies c ON c.id = t.company_id
-        WHERE t.gen_type_id = 1
-          AND t.date BETWEEN #{startDate} AND #{endDate}
-          AND <include refid="RegionIdByCompanyName"/> IS NOT NULL
-        GROUP BY <include refid="RegionNameByCompanyName"/>, DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY)
-        ORDER BY weekStartDate, dimensionName
-    </select>
-
-    <select id="getRegionalWeeklyTrendByRegion" resultType="com.chng.powerexdashboardbackend.dto.weeklyreport.RegionalWeeklyTrendDTO">
-        SELECT
-            c.name AS dimensionName,
-            DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY) AS weekStartDate,
-            DATE_ADD(DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY), INTERVAL 6 DAY) AS weekEndDate,
-            COALESCE(AVG(t.spot_price), 0) AS avgSpotPrice
-        FROM spot_transactions t
-        JOIN companies c ON c.id = t.company_id
-        WHERE t.gen_type_id = 1
-          AND <include refid="RegionIdByCompanyName"/> = #{regionId}
-          AND t.date BETWEEN #{startDate} AND #{endDate}
-        GROUP BY c.name, DATE_SUB(t.date, INTERVAL (DAYOFWEEK(t.date) % 7) DAY)
-        ORDER BY weekStartDate, c.name
     </select>
 
 </mapper>

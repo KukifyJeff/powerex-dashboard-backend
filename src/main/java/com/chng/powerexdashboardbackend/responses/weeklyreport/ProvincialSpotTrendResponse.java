@@ -1,12 +1,14 @@
-package com.chng.powerexdashboardbackend.dto.weeklyreport;
+package com.chng.powerexdashboardbackend.responses.weeklyreport;
 
+import com.chng.powerexdashboardbackend.dto.weeklyreport.ChartSeriesDTO;
+import com.chng.powerexdashboardbackend.dto.weeklyreport.ProvincialSpotTrendWeekDTO;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @Data
-public class ProvincialSpotTrendResponseDTO {
+public class ProvincialSpotTrendResponse {
     private String unit;
     private String weekRule;
     private String maxWeekKey;
