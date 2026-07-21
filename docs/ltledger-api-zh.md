@@ -15,17 +15,19 @@
 - `genTypeIds: int[]`
 - `transactionTypeIds: int[]`
 - `transactionPeriodIds: int[]`
-- `contractStartDate: string` (`YYYY-MM-DD`)
-- `contractEndDate: string` (`YYYY-MM-DD`)
+- `contractStartMonth: string` (`YYYY-MM`)
+- `contractEndMonth: string` (`YYYY-MM`)
 - `isGreen: boolean`
 
 ### 2) LTLedgerOptionsQuery（仅用于 options）
 - `genTypeIds: int[]`
 - `transactionTypeIds: int[]`
 - `transactionPeriodIds: int[]`
-- `contractStartDate: string` (`YYYY-MM-DD`)
-- `contractEndDate: string` (`YYYY-MM-DD`)
+- `contractStartMonth: string` (`YYYY-MM`)
+- `contractEndMonth: string` (`YYYY-MM`)
 - `isGreen: boolean`
+
+> 筛选仅支持月份（`YYYY-MM`），后端会自动转换为当月首日/末日后过滤。
 
 > `options` 请求体 **不包含** `companyId`。
 
@@ -34,6 +36,7 @@
 ### 1) LTLedgerResponse（pivot）
 - `table: List<Map<String,Object>>`
   - 当前列：`companyId`, `companyName`, `chngTransactionAmount`, `chngTradedPrice`, `weightedBenchmarkPrice`
+  - 当 `isGreen=true` 时，额外返回：`weightedEnvPremium`（环境溢价，按 `chngTransactionAmount` 加权均价）
 - `meta: { companyCount, rowCount, fullCompanyCoverage }`
 
 ### 2) LTLedgerDTO（company_detail）
@@ -44,8 +47,8 @@
 - `genTypeIds: int[]`
 - `transactionPeriodIds: int[]`
 - `greenPowerOptions: int[]`（0/1）
-- `minContractDate: string`
-- `maxContractDate: string`
+- `minContractMonth: string`（`YYYY-MM`）
+- `maxContractMonth: string`（`YYYY-MM`）
 
 ## 接口列表
 
@@ -58,8 +61,8 @@
   "genTypeIds": [1],
   "transactionTypeIds": [1],
   "transactionPeriodIds": [1],
-  "contractStartDate": "2026-01-01",
-  "contractEndDate": "2026-03-31",
+  "contractStartMonth": "2026-01",
+  "contractEndMonth": "2026-03",
   "isGreen": false
 }
 ```
@@ -94,8 +97,8 @@
   "genTypeIds": [1],
   "transactionTypeIds": [1],
   "transactionPeriodIds": [1],
-  "contractStartDate": "2026-01-01",
-  "contractEndDate": "2026-03-31",
+  "contractStartMonth": "2026-01",
+  "contractEndMonth": "2026-03",
   "isGreen": false
 }
 ```
@@ -131,8 +134,8 @@
   "genTypeIds": [1, 2, 3],
   "transactionPeriodIds": [1, 2, 3, 4],
   "greenPowerOptions": [0, 1],
-  "minContractDate": "2018-01-01",
-  "maxContractDate": "2026-06-30"
+  "minContractMonth": "2018-01",
+  "maxContractMonth": "2026-06"
 }
 ```
 

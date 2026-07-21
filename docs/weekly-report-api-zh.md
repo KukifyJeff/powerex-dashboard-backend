@@ -74,6 +74,12 @@
   - `line`：光伏清分价
 - `weeks[]`：每周明细（`marketAvgPrice`, `coalChngPrice`, `windChngPrice`, `solarChngPrice`）
 
+> 周粒度计算口径：
+> - `marketAvgPrice`：先按“每日市场均价”口径得到每日值（有煤取煤，否则取风；排除天津/北京/雅江/新能源，且按公司算术平均），再按“纳入公司数”做周加权汇总。
+> - `coalChngPrice`：周内 `SUM(上网电量 * 日清分电价) / SUM(上网电量)`（仅煤电）。
+> - `windChngPrice`：周内 `SUM(上网电量 * 日清分电价) / SUM(上网电量)`（仅风电）。
+> - `solarChngPrice`：周内 `SUM(上网电量 * 日清分电价) / SUM(上网电量)`（仅光伏）。
+
 ---
 
 ## 3) 中长期交易量价走势

@@ -248,7 +248,8 @@
             c.name AS companyName,
             t.chng_transaction_amount AS chngTransactionAmount,
             t.chng_avg_price AS chngTradedPrice,
-            t.base_price AS basePrice
+            t.base_price AS basePrice,
+            t.env_premium AS envPremium
 
         FROM companies c
         LEFT JOIN longterm_transactions t

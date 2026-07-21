@@ -20,8 +20,8 @@ Schemas (Java class equivalents)
   - contractPeriods: [string] (raw Excel strings)
   - isGreen: boolean
   - transactionDate: string (YYYY-MM-DD)
-  - contractStartDate: string (YYYY-MM-DD)
-  - contractEndDate: string (YYYY-MM-DD)
+  - contractStartMonth: string (YYYY-MM)
+  - contractEndMonth: string (YYYY-MM)
 
 - LTLedgerDTO (response row)
   - id, transactionId
@@ -36,7 +36,7 @@ Schemas (Java class equivalents)
 - LTLedgerResponse (pivot response)
   - table: List<Map<string,object>> (company rows with dynamic pivot columns)
   - raw: List<LTLedgerDTO> (optional raw rows used to build pivot)
-  - filters: { transactionTypes[], powerTypes[], transactionPeriods[], contractStartDates[], contractEndDates[], greenPowerOptions[] }
+  - filters: { transactionTypes[], powerTypes[], transactionPeriods[], contractStartMonths[], contractEndMonths[], greenPowerOptions[] }
   - meta: { companyCount, rowCount, fullCompanyCoverage }
 
 Endpoints
@@ -47,8 +47,8 @@ Endpoints
 {
   "genTypeNames": ["煤电"],
   "transactionTypes": ["直接"],
-  "contractStartDate": "2025-01-01",
-  "contractEndDate": "2025-12-31",
+  "contractStartMonth": "2025-01",
+  "contractEndMonth": "2025-12",
   "isGreen": true
 }
 
@@ -69,7 +69,7 @@ Endpoints
 - Response: List<LTLedgerTrendDTO> [{period: "YYYY-MM", tradedPower, weightedBenchmarkPrice, huanengTradedPrice}]
 
 6) GET /options
-- Response: LTLedgerFilterOptionsDTO (transactionTypes, powerTypes, transactionPeriods, greenPowerOptions, minContractDate, maxContractDate)
+- Response: LTLedgerFilterOptionsDTO (transactionTypes, powerTypes, transactionPeriods, greenPowerOptions, minContractMonth, maxContractMonth)
 
 Implementation notes
 - Server maps names to IDs by querying lookup tables (companies, gen_types, transaction_types, transaction_periods) using helper mapper queries.
@@ -80,4 +80,3 @@ Implementation notes
 Next Steps
 - Implement frontend REST calls to POST /pivot and render returned table directly.
 - Add OpenAPI/Swagger file and example responses (I can generate automatically).
-

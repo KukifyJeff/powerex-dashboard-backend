@@ -1,6 +1,9 @@
 package com.chng.powerexdashboardbackend.services.importdata;
 
 import com.chng.powerexdashboardbackend.config.ImportDataProperties;
+import com.chng.powerexdashboardbackend.enums.GenTypeEnum;
+import com.chng.powerexdashboardbackend.enums.TransactionPeriodEnum;
+import com.chng.powerexdashboardbackend.enums.TransactionTypeEnum;
 import com.chng.powerexdashboardbackend.responses.importdata.ImportDataActionResponse;
 import com.chng.powerexdashboardbackend.responses.importdata.ImportDataFileItem;
 import com.chng.powerexdashboardbackend.responses.importdata.ImportDataJobResponse;
@@ -749,8 +752,8 @@ public class ImportDataService {
                 continue;
             }
 
-            Integer typeId = maps.transactionTypeNameToId.get(normalizeKey(getFirst(row, "交易类型")));
-            Integer periodId = maps.transactionPeriodNameToId.get(normalizeKey(getFirst(row, "交易周期")));
+            Integer typeId = resolveTransactionTypeId(getFirst(row, "交易类型"), maps.transactionTypeNameToId);
+            Integer periodId = resolveTransactionPeriodId(getFirst(row, "交易周期"), maps.transactionPeriodNameToId);
             PeriodParseResult period = parseContractPeriod(getFirst(row, "合同执行周期"), defaultYear);
             LocalDate transactionDate = parseTransactionDate(getFirst(row, "交易日期"), defaultYear);
 
@@ -968,9 +971,43 @@ public class ImportDataService {
         }
         String key = normalizeKey(raw);
         if ("煤机".equals(key)) {
-            key = "煤电";
+            key = normalizeKey(GenTypeEnum.COAL.getName());
         }
         return genTypeNameToId.get(key);
+    }
+
+    private Integer resolveTransactionTypeId(String raw, Map<String, Integer> transactionTypeNameToId) {
+        if (blank(raw)) {
+            return null;
+        }
+        String key = normalizeKey(raw);
+        Integer id = transactionTypeNameToId.get(key);
+        if (id != null) {
+            return id;
+        }
+        for (TransactionTypeEnum transactionType : TransactionTypeEnum.values()) {
+            if (normalizeKey(transactionType.getName()).equals(key)) {
+                return transactionType.getId();
+            }
+        }
+        return null;
+    }
+
+    private Integer resolveTransactionPeriodId(String raw, Map<String, Integer> transactionPeriodNameToId) {
+        if (blank(raw)) {
+            return null;
+        }
+        String key = normalizeKey(raw);
+        Integer id = transactionPeriodNameToId.get(key);
+        if (id != null) {
+            return id;
+        }
+        for (TransactionPeriodEnum transactionPeriod : TransactionPeriodEnum.values()) {
+            if (normalizeKey(transactionPeriod.getName()).equals(key)) {
+                return transactionPeriod.getId();
+            }
+        }
+        return null;
     }
 
     private Integer detectSpotGenTypeFromFileName(String fileName, Map<String, Integer> genTypeNameToId) {
@@ -979,13 +1016,13 @@ public class ImportDataService {
         }
         String f = fileName.toLowerCase(Locale.ROOT);
         if (f.contains("煤")) {
-            return genTypeNameToId.get("煤电");
+            return genTypeNameToId.get(normalizeKey(GenTypeEnum.COAL.getName()));
         }
         if (f.contains("风")) {
-            return genTypeNameToId.get("风电");
+            return genTypeNameToId.get(normalizeKey(GenTypeEnum.WIND.getName()));
         }
         if (f.contains("光")) {
-            return genTypeNameToId.get("光伏");
+            return genTypeNameToId.get(normalizeKey(GenTypeEnum.SOLAR.getName()));
         }
         return null;
     }

@@ -4,6 +4,7 @@ import com.chng.powerexdashboardbackend.dto.home.HomeImportSnapshotDTO;
 import com.chng.powerexdashboardbackend.dto.home.HomeLongtermAssetStatDTO;
 import com.chng.powerexdashboardbackend.dto.home.HomePriceExtremeDTO;
 import com.chng.powerexdashboardbackend.dto.home.HomeSpotAssetStatDTO;
+import com.chng.powerexdashboardbackend.enums.GenTypeEnum;
 import com.chng.powerexdashboardbackend.mapper.home.HomeOverviewMapper;
 import com.chng.powerexdashboardbackend.responses.home.HomeDataAssetItem;
 import com.chng.powerexdashboardbackend.responses.home.HomeDataStatus;
@@ -227,12 +228,15 @@ public class HomeOverviewService {
         if (genTypeId == null) {
             return "-";
         }
-        return switch (genTypeId) {
-            case 1 -> "燃煤";
-            case 2 -> "光伏";
-            case 3 -> "风电";
-            default -> "其他";
-        };
+        try {
+            GenTypeEnum genType = GenTypeEnum.of(genTypeId);
+            if (genType == GenTypeEnum.COAL) {
+                return "燃煤";
+            }
+            return genType.getName();
+        } catch (IllegalArgumentException ex) {
+            return "其他";
+        }
     }
 
     private String formatLongtermPeriodRange(HomeLongtermAssetStatDTO stat) {

@@ -1,5 +1,6 @@
 package com.chng.powerexdashboardbackend.services;
 
+import com.chng.powerexdashboardbackend.enums.GenTypeEnum;
 import com.chng.powerexdashboardbackend.utils.MetricCalculationUtil;
 
 import com.chng.powerexdashboardbackend.dto.spottracking.*;
@@ -227,7 +228,7 @@ public class SpotTrackingServices {
             BigDecimal basePrice = yearlyPrice.compareTo(BigDecimal.ZERO) > 0 ? yearlyPrice : monthlyPrice;
             row.setPriceDiff(chngAvgPrice.subtract(basePrice));
 
-            if (genTypeId != null && genTypeId == 1) {
+            if (isCoalGenType(genTypeId)) {
                 BigDecimal capacity = nvl(spot.getCapacity());
                 if (capacity.compareTo(BigDecimal.ZERO) > 0) {
                     BigDecimal income = chngAvgPrice
@@ -276,7 +277,7 @@ public class SpotTrackingServices {
                     sumSpotAvgPrice.divide(BigDecimal.valueOf(spotAvgCount), 6, RoundingMode.HALF_UP));
             total.setChngAvgPrice(ratio(sumChngAvgPriceNum, sumGen));
             total.setPriceDiff(ratio(sumPriceDiffNum, sumGen));
-            if (genTypeId != null && genTypeId == 1) {
+            if (isCoalGenType(genTypeId)) {
                 total.setUnitCapacityIncome(ratio(sumUnitCapacityIncomeNum, sumGen));
             } else {
                 total.setUnitCapacityIncome(null);
@@ -296,6 +297,10 @@ public class SpotTrackingServices {
             return BigDecimal.ZERO;
         }
         return nvl(numerator).divide(denominator, 6, RoundingMode.HALF_UP);
+    }
+
+    private boolean isCoalGenType(Integer genTypeId) {
+        return genTypeId != null && genTypeId.equals(GenTypeEnum.COAL.getId());
     }
 
     private SpotDataResponse buildSpotTotalRow(List<SpotDataResponse> rows) {

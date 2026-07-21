@@ -10,7 +10,12 @@ import com.chng.powerexdashboardbackend.request.ltledger.LTLedgerQuery;
 import com.chng.powerexdashboardbackend.responses.ltledger.LTLedgerResponse;
 import com.chng.powerexdashboardbackend.utils.CsvExportUtil;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -20,6 +25,7 @@ import java.util.Map;
 
 @Service
 public class LTLedgerServices {
+    private static final DateTimeFormatter MONTH_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM");
 
     private final LTLedgerMapper mapper;
     private final PivotServices pivotServices;
@@ -33,12 +39,12 @@ public class LTLedgerServices {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
-        String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
-        String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
+        ContractRange contractRange = resolveContractRange(query);
         List<Integer> green = buildGreenList(query.getIsGreen());
+        boolean includeEnvPremium = Boolean.TRUE.equals(query.getIsGreen());
 
-        List<LTLedgerDTO> rows = mapper.getLedgerPivot(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
-        List<Map<String, Object>> table = pivotServices.buildPivot(rows);
+        List<LTLedgerDTO> rows = mapper.getLedgerPivot(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green);
+        List<Map<String, Object>> table = pivotServices.buildPivot(rows, includeEnvPremium);
 
         LTLedgerResponse resp = new LTLedgerResponse();
         resp.setTable(table);
@@ -54,52 +60,52 @@ public class LTLedgerServices {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
-        String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
-        String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
+        ContractRange contractRange = resolveContractRange(query);
         List<Integer> green = buildGreenList(query.getIsGreen());
-        return mapper.getLedgerDetail(query.getCompanyId(), genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        return mapper.getLedgerDetail(query.getCompanyId(), genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green);
     }
 
     public LTLedgerSummaryDTO getSummary(LTLedgerQuery query) {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
-        String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
-        String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
+        ContractRange contractRange = resolveContractRange(query);
         List<Integer> green = buildGreenList(query.getIsGreen());
-        return mapper.getLedgerSummary(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        return mapper.getLedgerSummary(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green);
     }
 
     public List<LTLedgerTrendDTO> getTrend(LTLedgerQuery query) {
         List<Integer> genTypeIds = resolveGenTypeIds(query);
         List<Integer> transactionTypeIds = resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = resolveTransactionPeriodIds(query);
-        String start = query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
-        String end = query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
+        ContractRange contractRange = resolveContractRange(query);
         List<Integer> green = buildGreenList(query.getIsGreen());
-        return mapper.getLedgerTrend(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green);
+        return mapper.getLedgerTrend(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green);
     }
 
     public com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerFilterOptionsDTO getFilterOptions(LTLedgerOptionsQuery query) {
         List<Integer> genTypeIds = query == null ? null : resolveGenTypeIds(query);
         List<Integer> transactionTypeIds = query == null ? null : resolveTransactionTypeIds(query);
         List<Integer> transactionPeriodIds = query == null ? null : resolveTransactionPeriodIds(query);
-        String start = query == null || query.getContractStartDate() == null ? null : query.getContractStartDate().toString();
-        String end = query == null || query.getContractEndDate() == null ? null : query.getContractEndDate().toString();
+        ContractRange contractRange = resolveContractRange(query);
         List<Integer> green = query == null ? null : buildGreenList(query.getIsGreen());
 
         com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerFilterOptionsDTO opts = new com.chng.powerexdashboardbackend.dto.ltledger.LTLedgerFilterOptionsDTO();
-        opts.setTransactionTypeIds(mapper.getTransactionTypes(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green));
-        opts.setGenTypeIds(mapper.getGenTypes(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green));
-        opts.setTransactionPeriodIds(mapper.getTransactionPeriods(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green));
-        opts.setGreenPowerOptions(mapper.getGreenPowerOptions(genTypeIds, transactionTypeIds, transactionPeriodIds, start, end, green));
+        opts.setTransactionTypeIds(mapper.getTransactionTypes(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green));
+        opts.setGenTypeIds(mapper.getGenTypes(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green));
+        opts.setTransactionPeriodIds(mapper.getTransactionPeriods(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green));
+        opts.setGreenPowerOptions(mapper.getGreenPowerOptions(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green));
         // mapper returns string dates; parse to LocalDate when present
         try {
             // keep date bounds globally fixed, not narrowed by current filter selections
             String min = mapper.getMinContractDate(null, null, null, null, null, null);
             String max = mapper.getMaxContractDate(null, null, null, null, null, null);
-            if (min != null) opts.setMinContractDate(java.time.LocalDate.parse(min));
-            if (max != null) opts.setMaxContractDate(java.time.LocalDate.parse(max));
+            if (min != null) {
+                opts.setMinContractMonth(parseYearMonthFromDate(min).format(MONTH_FORMATTER));
+            }
+            if (max != null) {
+                opts.setMaxContractMonth(parseYearMonthFromDate(max).format(MONTH_FORMATTER));
+            }
         } catch (Exception ex) {
             // ignore parse errors and leave nulls
         }
@@ -141,16 +147,26 @@ public class LTLedgerServices {
 
     public byte[] exportPivotCsv(LTLedgerQuery query) {
         LTLedgerResponse resp = getPivot(query == null ? new LTLedgerQuery() : query);
-        List<String> headers = List.of("companyId", "companyName", "chngTransactionAmount", "chngTradedPrice", "weightedBenchmarkPrice");
+        boolean includeEnvPremium = resp.getTable() != null
+                && !resp.getTable().isEmpty()
+                && resp.getTable().get(0).containsKey("weightedEnvPremium");
+        List<String> headers = new ArrayList<>(List.of("companyId", "companyName", "chngTransactionAmount", "chngTradedPrice", "weightedBenchmarkPrice"));
+        if (includeEnvPremium) {
+            headers.add("weightedEnvPremium");
+        }
         List<List<?>> rows = new ArrayList<>();
         for (Map<String, Object> row : resp.getTable()) {
-            rows.add(Arrays.asList(
+            List<Object> line = new ArrayList<>(Arrays.asList(
                     row.get("companyId"),
                     row.get("companyName"),
                     row.get("chngTransactionAmount"),
                     row.get("chngTradedPrice"),
                     row.get("weightedBenchmarkPrice")
             ));
+            if (includeEnvPremium) {
+                line.add(row.get("weightedEnvPremium"));
+            }
+            rows.add(line);
         }
         return CsvExportUtil.toCsvBytes(headers, rows);
     }
@@ -173,6 +189,12 @@ public class LTLedgerServices {
 
             LTLedgerQuery q = item == null || item.getQuery() == null ? new LTLedgerQuery() : item.getQuery();
             List<Map<String, Object>> table = getPivot(q).getTable();
+            boolean includeEnvPremium = table != null
+                    && !table.isEmpty()
+                    && table.get(0).containsKey("weightedEnvPremium");
+            if (includeEnvPremium) {
+                headers.add(label + "_weightedEnvPremium");
+            }
 
             for (Map<String, Object> row : table) {
                 Object idObj = row.get("companyId");
@@ -189,6 +211,9 @@ public class LTLedgerServices {
                 mergedRow.put(label + "_chngTransactionAmount", row.get("chngTransactionAmount"));
                 mergedRow.put(label + "_chngTradedPrice", row.get("chngTradedPrice"));
                 mergedRow.put(label + "_weightedBenchmarkPrice", row.get("weightedBenchmarkPrice"));
+                if (includeEnvPremium) {
+                    mergedRow.put(label + "_weightedEnvPremium", row.get("weightedEnvPremium"));
+                }
             }
         }
 
@@ -241,10 +266,62 @@ public class LTLedgerServices {
         copy.setGenTypeIds(source.getGenTypeIds() == null ? null : new ArrayList<>(source.getGenTypeIds()));
         copy.setTransactionTypeIds(source.getTransactionTypeIds() == null ? null : new ArrayList<>(source.getTransactionTypeIds()));
         copy.setTransactionPeriodIds(source.getTransactionPeriodIds() == null ? null : new ArrayList<>(source.getTransactionPeriodIds()));
-        copy.setContractStartDate(source.getContractStartDate());
-        copy.setContractEndDate(source.getContractEndDate());
+        copy.setContractStartMonth(source.getContractStartMonth());
+        copy.setContractEndMonth(source.getContractEndMonth());
         copy.setIsGreen(source.getIsGreen());
         return copy;
+    }
+
+    private ContractRange resolveContractRange(LTLedgerQuery query) {
+        if (query == null) {
+            return new ContractRange(null, null);
+        }
+        return resolveContractRange(
+                query.getContractStartMonth(),
+                query.getContractEndMonth()
+        );
+    }
+
+    private ContractRange resolveContractRange(LTLedgerOptionsQuery query) {
+        if (query == null) {
+            return new ContractRange(null, null);
+        }
+        return resolveContractRange(
+                query.getContractStartMonth(),
+                query.getContractEndMonth()
+        );
+    }
+
+    private ContractRange resolveContractRange(String contractStartMonth,
+                                               String contractEndMonth) {
+        YearMonth start = null;
+        YearMonth end = null;
+        if (contractStartMonth != null && !contractStartMonth.isBlank()) {
+            start = parseYearMonth(contractStartMonth);
+        }
+        if (contractEndMonth != null && !contractEndMonth.isBlank()) {
+            end = parseYearMonth(contractEndMonth);
+        }
+        return new ContractRange(
+                start == null ? null : start.atDay(1).toString(),
+                end == null ? null : end.atEndOfMonth().toString()
+        );
+    }
+
+    private YearMonth parseYearMonth(String raw) {
+        try {
+            return YearMonth.parse(raw.trim(), MONTH_FORMATTER);
+        } catch (DateTimeParseException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid contract month, expected YYYY-MM: " + raw);
+        }
+    }
+
+    private YearMonth parseYearMonthFromDate(String rawDate) {
+        String trimmed = rawDate == null ? "" : rawDate.trim();
+        if (trimmed.length() < 7) {
+            throw new DateTimeParseException("Invalid date for month extraction", trimmed, 0);
+        }
+        return parseYearMonth(trimmed.substring(0, 7));
     }
 
     private void applyCompareGroup(LTLedgerQuery query, String dimension, List<Integer> group) {
@@ -276,5 +353,8 @@ public class LTLedgerServices {
             return "compare" + index;
         }
         return label.trim().replaceAll("\\s+", "_");
+    }
+
+    private record ContractRange(String start, String end) {
     }
 }

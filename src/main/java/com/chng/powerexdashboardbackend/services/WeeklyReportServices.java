@@ -16,6 +16,7 @@ import com.chng.powerexdashboardbackend.responses.weeklyreport.LongtermAmountPri
 import com.chng.powerexdashboardbackend.responses.weeklyreport.WeeklyReportOptionsResponse;
 import com.chng.powerexdashboardbackend.responses.weeklyreport.ProvincialSpotTrendResponse;
 import com.chng.powerexdashboardbackend.responses.weeklyreport.RegionalSpotTrendResponse;
+import com.chng.powerexdashboardbackend.enums.RegionEnum;
 import com.chng.powerexdashboardbackend.mapper.weeklyreport.WeeklyReportMapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
@@ -418,9 +419,8 @@ public class WeeklyReportServices {
     }
 
     public RegionalSpotTrendResponse getRegionalSpotTrend(Integer regionId, String lastDataWeekKey) {
-        if (regionId == null || regionId < 1 || regionId > 7 || regionId == 8) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid regionId: " + regionId);
-        }
+        RegionEnum requestedRegion = resolveWeeklyReportRegion(regionId);
+        RegionEnum displayRegion = requestedRegion == RegionEnum.SOUTHWEST ? RegionEnum.CENTRAL_CHINA : requestedRegion;
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
         RegionalSpotTrendResponse response = new RegionalSpotTrendResponse();
         response.setUnit("元/MWh");
@@ -467,8 +467,8 @@ public class WeeklyReportServices {
         response.setMaxWeekKey(timeline.maxWeekKey());
         response.setSelectedLastDataWeekKey(selectedWeekKey);
         response.setXAxis(windows.stream().map(WeekWindow::key).toList());
-        response.setRegionId(regionId == 7 ? 4 : regionId);
-        response.setRegionName(regionName(regionId == 7 ? 4 : regionId));
+        response.setRegionId(displayRegion.getId());
+        response.setRegionName(displayRegion.getName());
 
         List<RegionalSpotTrendCompanyDTO> companies = new ArrayList<>();
         for (Map.Entry<String, Map<LocalDate, BigDecimal>> entry : companyDailyMap.entrySet()) {
@@ -537,10 +537,14 @@ public class WeeklyReportServices {
     }
 
     private CompanyPriceTrendWeekDTO buildCompanyWeekStat(LocalDate weekStart, LocalDate weekEnd, Map<LocalDate, CompanyDailyPriceDTO> dailyMap) {
-        List<BigDecimal> marketValues = new ArrayList<>();
-        List<BigDecimal> coalValues = new ArrayList<>();
-        List<BigDecimal> windValues = new ArrayList<>();
-        List<BigDecimal> solarValues = new ArrayList<>();
+        BigDecimal marketPriceSum = BigDecimal.ZERO;
+        long marketCompanyCount = 0L;
+        BigDecimal coalPriceAmountNumerator = BigDecimal.ZERO;
+        BigDecimal coalAmountDenominator = BigDecimal.ZERO;
+        BigDecimal windPriceAmountNumerator = BigDecimal.ZERO;
+        BigDecimal windAmountDenominator = BigDecimal.ZERO;
+        BigDecimal solarPriceAmountNumerator = BigDecimal.ZERO;
+        BigDecimal solarAmountDenominator = BigDecimal.ZERO;
 
         for (Map.Entry<LocalDate, CompanyDailyPriceDTO> entry : dailyMap.entrySet()) {
             LocalDate date = entry.getKey();
@@ -548,27 +552,33 @@ public class WeeklyReportServices {
                 continue;
             }
             CompanyDailyPriceDTO row = entry.getValue();
-            if (row.getMarketAvgPrice() != null) {
-                marketValues.add(scalePrice(row.getMarketAvgPrice()));
+            if (row.getMarketPriceSum() != null) {
+                marketPriceSum = marketPriceSum.add(row.getMarketPriceSum());
             }
-            if (row.getCoalChngPrice() != null) {
-                coalValues.add(scalePrice(row.getCoalChngPrice()));
+            if (row.getMarketCompanyCount() != null) {
+                marketCompanyCount += row.getMarketCompanyCount();
             }
-            if (row.getWindChngPrice() != null) {
-                windValues.add(scalePrice(row.getWindChngPrice()));
+            if (isPositive(row.getCoalGenAmount()) && row.getCoalChngPrice() != null) {
+                coalPriceAmountNumerator = coalPriceAmountNumerator.add(row.getCoalGenAmount().multiply(row.getCoalChngPrice()));
+                coalAmountDenominator = coalAmountDenominator.add(row.getCoalGenAmount());
             }
-            if (row.getSolarChngPrice() != null) {
-                solarValues.add(scalePrice(row.getSolarChngPrice()));
+            if (isPositive(row.getWindGenAmount()) && row.getWindChngPrice() != null) {
+                windPriceAmountNumerator = windPriceAmountNumerator.add(row.getWindGenAmount().multiply(row.getWindChngPrice()));
+                windAmountDenominator = windAmountDenominator.add(row.getWindGenAmount());
+            }
+            if (isPositive(row.getSolarGenAmount()) && row.getSolarChngPrice() != null) {
+                solarPriceAmountNumerator = solarPriceAmountNumerator.add(row.getSolarGenAmount().multiply(row.getSolarChngPrice()));
+                solarAmountDenominator = solarAmountDenominator.add(row.getSolarGenAmount());
             }
         }
 
         CompanyPriceTrendWeekDTO dto = new CompanyPriceTrendWeekDTO();
         dto.setWeekStartDate(weekStart);
         dto.setWeekEndDate(weekEnd);
-        dto.setMarketAvgPrice(calculateAverage(marketValues));
-        dto.setCoalChngPrice(calculateAverage(coalValues));
-        dto.setWindChngPrice(calculateAverage(windValues));
-        dto.setSolarChngPrice(calculateAverage(solarValues));
+        dto.setMarketAvgPrice(ratio(marketPriceSum, BigDecimal.valueOf(marketCompanyCount)));
+        dto.setCoalChngPrice(ratio(coalPriceAmountNumerator, coalAmountDenominator));
+        dto.setWindChngPrice(ratio(windPriceAmountNumerator, windAmountDenominator));
+        dto.setSolarChngPrice(ratio(solarPriceAmountNumerator, solarAmountDenominator));
         return dto;
     }
 
@@ -600,6 +610,17 @@ public class WeeklyReportServices {
         return scalePrice(sum.divide(BigDecimal.valueOf(values.size()), 10, RoundingMode.HALF_UP));
     }
 
+    private boolean isPositive(BigDecimal value) {
+        return value != null && value.compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    private BigDecimal ratio(BigDecimal numerator, BigDecimal denominator) {
+        if (denominator == null || denominator.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return scalePrice(numerator.divide(denominator, 10, RoundingMode.HALF_UP));
+    }
+
     private BigDecimal scalePrice(BigDecimal value) {
         return value.setScale(2, RoundingMode.HALF_UP);
     }
@@ -621,7 +642,7 @@ public class WeeklyReportServices {
         excludedNames.put("天津", Boolean.TRUE);
         excludedNames.put("北京", Boolean.TRUE);
         excludedNames.put("雅江", Boolean.TRUE);
-        excludedNames.put("新能源", Boolean.TRUE);
+        excludedNames.put(RegionEnum.NEW_ENERGY.getName(), Boolean.TRUE);
 
         Map<LocalDate, Map<Long, ProvincialSpotCompanyDailyDTO>> grouped = new TreeMap<>();
         for (ProvincialSpotCompanyDailyDTO row : rows) {
@@ -664,16 +685,20 @@ public class WeeklyReportServices {
         return values;
     }
 
-    private String regionName(Integer regionId) {
-        return switch (regionId) {
-            case 1 -> "东北";
-            case 2 -> "西北";
-            case 3 -> "华北";
-            case 4 -> "华中";
-            case 5 -> "华东";
-            case 6 -> "南方";
-            default -> "未知区域";
-        };
+    private RegionEnum resolveWeeklyReportRegion(Integer regionId) {
+        if (regionId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid regionId: " + regionId);
+        }
+        RegionEnum region;
+        try {
+            region = RegionEnum.of(regionId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid regionId: " + regionId);
+        }
+        if (region == RegionEnum.NEW_ENERGY) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid regionId: " + regionId);
+        }
+        return region;
     }
 
     private WeekWindow resolveSelectedWeekWindow(String lastDataWeekKey) {

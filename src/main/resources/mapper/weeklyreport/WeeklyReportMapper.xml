@@ -70,24 +70,44 @@
         SELECT
             d.priceDate,
             d.marketAvgPrice,
+            d.marketPriceSum,
+            d.marketCompanyCount,
             COALESCE(
                 SUM(CASE WHEN t.gen_type_id = 1 THEN t.gen_amount * t.chng_spot_price ELSE 0 END)
                 / NULLIF(SUM(CASE WHEN t.gen_type_id = 1 THEN t.gen_amount ELSE 0 END), 0),
                 0
             ) AS coalChngPrice,
+            COALESCE(SUM(CASE WHEN t.gen_type_id = 1 THEN t.gen_amount ELSE 0 END), 0) AS coalGenAmount,
             COALESCE(
                 SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount * t.chng_spot_price ELSE 0 END)
                 / NULLIF(SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount ELSE 0 END), 0),
                 0
             ) AS windChngPrice,
+            COALESCE(SUM(CASE WHEN t.gen_type_id = 3 THEN t.gen_amount ELSE 0 END), 0) AS windGenAmount,
             COALESCE(
                 SUM(CASE WHEN t.gen_type_id = 2 THEN t.gen_amount * t.chng_spot_price ELSE 0 END)
                 / NULLIF(SUM(CASE WHEN t.gen_type_id = 2 THEN t.gen_amount ELSE 0 END), 0),
                 0
-            ) AS solarChngPrice
+            ) AS solarChngPrice,
+            COALESCE(SUM(CASE WHEN t.gen_type_id = 2 THEN t.gen_amount ELSE 0 END), 0) AS solarGenAmount
         FROM (
             SELECT
                 cd.priceDate,
+                SUM(
+                    CASE
+                        WHEN cd.companyName IN ('天津', '北京', '雅江', '新能源') THEN NULL
+                        WHEN cd.coalSpotAvgPrice IS NOT NULL THEN cd.coalSpotAvgPrice
+                        ELSE cd.windSpotAvgPrice
+                    END
+                ) AS marketPriceSum,
+                COUNT(
+                    CASE
+                        WHEN cd.companyName IN ('天津', '北京', '雅江', '新能源') THEN NULL
+                        WHEN cd.coalSpotAvgPrice IS NOT NULL THEN 1
+                        WHEN cd.windSpotAvgPrice IS NOT NULL THEN 1
+                        ELSE NULL
+                    END
+                ) AS marketCompanyCount,
                 AVG(
                     CASE
                         WHEN cd.companyName IN ('天津', '北京', '雅江', '新能源') THEN NULL
@@ -110,7 +130,7 @@
         ) d
         JOIN spot_transactions t ON t.date = d.priceDate
         WHERE t.date BETWEEN #{startDate} AND #{endDate}
-        GROUP BY d.priceDate, d.marketAvgPrice
+        GROUP BY d.priceDate, d.marketAvgPrice, d.marketPriceSum, d.marketCompanyCount
         ORDER BY d.priceDate
     </select>
 
