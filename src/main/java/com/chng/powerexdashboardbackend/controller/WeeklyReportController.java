@@ -35,14 +35,16 @@ public class WeeklyReportController {
 
     @GetMapping("/provincial-spot-trend")
     public ProvincialSpotTrendResponse provincialSpotTrend(
-            @RequestParam(required = false) String lastDataWeekKey) {
-        return weeklyReportServices.getProvincialSpotTrend(lastDataWeekKey);
+            @RequestParam(required = false) String lastDataWeekKey,
+            @RequestParam(required = false) Integer recentWeekCount) {
+        return weeklyReportServices.getProvincialSpotTrend(lastDataWeekKey, recentWeekCount);
     }
 
     @GetMapping("/company-price-trend")
     public CompanyPriceTrendResponse companyPriceTrend(
-            @RequestParam(required = false) String lastDataWeekKey) {
-        return weeklyReportServices.getCompanyPriceTrend(lastDataWeekKey);
+            @RequestParam(required = false) String lastDataWeekKey,
+            @RequestParam(required = false) Integer recentWeekCount) {
+        return weeklyReportServices.getCompanyPriceTrend(lastDataWeekKey, recentWeekCount);
     }
 
     @GetMapping("/longterm-amount-price-trend")
@@ -54,8 +56,9 @@ public class WeeklyReportController {
     @GetMapping("/regional-spot-trend")
     public RegionalSpotTrendResponse regionalSpotTrend(
             @RequestParam Integer regionId,
-            @RequestParam(required = false) String lastDataWeekKey) {
-        return weeklyReportServices.getRegionalSpotTrend(regionId, lastDataWeekKey);
+            @RequestParam(required = false) String lastDataWeekKey,
+            @RequestParam(required = false) Integer recentWeekCount) {
+        return weeklyReportServices.getRegionalSpotTrend(regionId, lastDataWeekKey, recentWeekCount);
     }
 
     @PostMapping("/export-charts")

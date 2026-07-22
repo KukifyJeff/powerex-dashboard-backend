@@ -53,6 +53,7 @@ import java.util.zip.ZipOutputStream;
 public class WeeklyReportServices {
 
     private static final int RECENT_WEEK_COUNT = 10;
+    private static final int MIN_RECENT_WEEK_COUNT = 1;
     private static final int EXPORT_CHART_COUNT = 9;
     private static final DateTimeFormatter EXPORT_DATE_FORMATTER = DateTimeFormatter.BASIC_ISO_DATE;
     private static final List<String> EXPORT_CHART_FILE_BASE_NAMES = List.of(
@@ -74,11 +75,15 @@ public class WeeklyReportServices {
         if (latestDate == null) {
             response.setMaxWeekKey(null);
             response.setWeekOptions(new ArrayList<>());
+            response.setMaxRecentWeekCount(0);
+            response.setDefaultRecentWeekCount(RECENT_WEEK_COUNT);
             return response;
         }
         WeekTimeline timeline = buildWeekTimeline(latestDate);
         response.setMaxWeekKey(timeline.maxWeekKey());
         response.setWeekOptions(timeline.weekKeys());
+        response.setMaxRecentWeekCount(timeline.weekKeys().size());
+        response.setDefaultRecentWeekCount(RECENT_WEEK_COUNT);
         return response;
     }
 
@@ -111,7 +116,7 @@ public class WeeklyReportServices {
         return new WeeklyReportChartsZipResult(zipFileName, outputStream.toByteArray());
     }
 
-    public ProvincialSpotTrendResponse getProvincialSpotTrend(String lastDataWeekKey) {
+    public ProvincialSpotTrendResponse getProvincialSpotTrend(String lastDataWeekKey, Integer recentWeekCount) {
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
         ProvincialSpotTrendResponse response = new ProvincialSpotTrendResponse();
         response.setUnit("元/MWh");
@@ -141,6 +146,7 @@ public class WeeklyReportServices {
         if (selectedWindow == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lastDataWeekKey: " + selectedWeekKey);
         }
+        int count = resolveRecentWeekCount(recentWeekCount, timeline.weekKeys().size());
 
         List<ProvincialSpotCompanyDailyDTO> companyDailyRows = weeklyReportMapper.getProvincialCompanyDailyPrices(
                 LocalDate.of(latestDate.getYear(), 1, 1),
@@ -150,7 +156,7 @@ public class WeeklyReportServices {
 
         List<ProvincialSpotTrendWeekDTO> weeks = new ArrayList<>();
         List<String> xAxis = new ArrayList<>();
-        for (WeekWindow window : timeline.recentWeekWindowsUpTo(selectedWeekKey, RECENT_WEEK_COUNT)) {
+        for (WeekWindow window : timeline.recentWeekWindowsUpTo(selectedWeekKey, count)) {
             List<BigDecimal> values = collectDailyValues(dailyMarketPrices, window.startDate(), window.endDate());
             weeks.add(buildWeekStat(window.startDate(), window.endDate(), values));
             xAxis.add(window.key());
@@ -220,7 +226,7 @@ public class WeeklyReportServices {
         return response;
     }
 
-    public CompanyPriceTrendResponse getCompanyPriceTrend(String lastDataWeekKey) {
+    public CompanyPriceTrendResponse getCompanyPriceTrend(String lastDataWeekKey, Integer recentWeekCount) {
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
         CompanyPriceTrendResponse response = new CompanyPriceTrendResponse();
         response.setUnit("元/MWh");
@@ -248,6 +254,7 @@ public class WeeklyReportServices {
         if (selectedWindow == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lastDataWeekKey: " + selectedWeekKey);
         }
+        int count = resolveRecentWeekCount(recentWeekCount, timeline.weekKeys().size());
 
         List<CompanyDailyPriceDTO> dailyRows = weeklyReportMapper.getCompanyDailyPriceTrend(
                 LocalDate.of(latestDate.getYear(), 1, 1),
@@ -262,7 +269,7 @@ public class WeeklyReportServices {
 
         List<CompanyPriceTrendWeekDTO> weeks = new ArrayList<>();
         List<String> xAxis = new ArrayList<>();
-        for (WeekWindow window : timeline.recentWeekWindowsUpTo(selectedWeekKey, RECENT_WEEK_COUNT)) {
+        for (WeekWindow window : timeline.recentWeekWindowsUpTo(selectedWeekKey, count)) {
             weeks.add(buildCompanyWeekStat(window.startDate(), window.endDate(), dailyMap));
             xAxis.add(window.key());
         }
@@ -343,7 +350,6 @@ public class WeeklyReportServices {
         if (selectedWindow == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lastDataWeekKey: " + selectedWeekKey);
         }
-
         LocalDate contractStartDate = LocalDate.of(selectedWindow.startDate().getYear(), 1, 1);
         LocalDate monthEnd = YearMonth.from(selectedWindow.endDate()).atEndOfMonth();
         LocalDate yearEnd = LocalDate.of(selectedWindow.startDate().getYear(), 12, 31);
@@ -418,7 +424,7 @@ public class WeeklyReportServices {
         return response;
     }
 
-    public RegionalSpotTrendResponse getRegionalSpotTrend(Integer regionId, String lastDataWeekKey) {
+    public RegionalSpotTrendResponse getRegionalSpotTrend(Integer regionId, String lastDataWeekKey, Integer recentWeekCount) {
         RegionEnum requestedRegion = resolveWeeklyReportRegion(regionId);
         RegionEnum displayRegion = requestedRegion == RegionEnum.SOUTHWEST ? RegionEnum.CENTRAL_CHINA : requestedRegion;
         LocalDate latestDate = weeklyReportMapper.getLatestSpotDate();
@@ -448,6 +454,7 @@ public class WeeklyReportServices {
         if (selectedWindow == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lastDataWeekKey: " + selectedWeekKey);
         }
+        int count = resolveRecentWeekCount(recentWeekCount, timeline.weekKeys().size());
 
         List<RegionalCompanyDailySpotPriceDTO> dailyRows = weeklyReportMapper.getRegionalCompanyDailySpotPriceTrend(
                 regionId,
@@ -463,7 +470,7 @@ public class WeeklyReportServices {
                     .put(row.getPriceDate(), scalePrice(row.getAvgSpotPrice()));
         }
 
-        List<WeekWindow> windows = timeline.recentWeekWindowsUpTo(selectedWeekKey, RECENT_WEEK_COUNT);
+        List<WeekWindow> windows = timeline.recentWeekWindowsUpTo(selectedWeekKey, count);
         response.setMaxWeekKey(timeline.maxWeekKey());
         response.setSelectedLastDataWeekKey(selectedWeekKey);
         response.setXAxis(windows.stream().map(WeekWindow::key).toList());
@@ -496,6 +503,14 @@ public class WeeklyReportServices {
         }
         response.setCompanies(companies);
         return response;
+    }
+
+    private int resolveRecentWeekCount(Integer recentWeekCount, int maxAvailableWeekCount) {
+        int requested = recentWeekCount == null ? RECENT_WEEK_COUNT : recentWeekCount;
+        if (requested < MIN_RECENT_WEEK_COUNT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "recentWeekCount must be >= " + MIN_RECENT_WEEK_COUNT);
+        }
+        return Math.min(requested, Math.max(0, maxAvailableWeekCount));
     }
 
     private DateRange resolveRange(Integer year, Integer startMonth, Integer endMonth) {

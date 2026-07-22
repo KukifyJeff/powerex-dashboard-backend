@@ -8,4 +8,6 @@ import java.util.List;
 public class WeeklyReportOptionsResponse {
     private String maxWeekKey;
     private List<String> weekOptions;
+    private Integer maxRecentWeekCount;
+    private Integer defaultRecentWeekCount;
 }
