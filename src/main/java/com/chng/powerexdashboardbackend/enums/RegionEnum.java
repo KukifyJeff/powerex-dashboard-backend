@@ -1,7 +1,10 @@
 package com.chng.powerexdashboardbackend.enums;
 
+import lombok.Getter;
+
 import java.util.Arrays;
 
+@Getter
 public enum RegionEnum {
 
     NORTHEAST(1, "东北"),
@@ -19,14 +22,6 @@ public enum RegionEnum {
     RegionEnum(int id, String name) {
         this.id = id;
         this.name = name;
-    }
-
-    public int getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
     }
 
     // 🔥 防错工具方法（非常重要）

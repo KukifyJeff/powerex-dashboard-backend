@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.chng.powerexdashboardbackend.mapper.graphanalysis.SpotAnalysisMapper">
+
+    <select id="selectCompanyOptions" resultType="com.chng.powerexdashboardbackend.dto.graphanalysis.IdNameDTO">
+        SELECT c.id, c.name
+        FROM companies c
+        WHERE c.id IS NOT NULL
+        ORDER BY c.id
+    </select>
+
+    <select id="selectRegionIds" resultType="java.lang.Integer">
+        SELECT DISTINCT c.region_id
+        FROM companies c
+        WHERE c.region_id IS NOT NULL
+        ORDER BY c.region_id
+    </select>
+
+    <select id="selectSpotDateRange" resultType="com.chng.powerexdashboardbackend.dto.graphanalysis.SpotDateRangeDTO">
+        SELECT
+            MIN(t.date) AS minDate,
+            MAX(t.date) AS maxDate
+        FROM spot_transactions t
+        WHERE t.date IS NOT NULL
+          AND t.spot_price IS NOT NULL
+    </select>
+
+    <select id="selectDailyAvgSpotPrice" resultType="com.chng.powerexdashboardbackend.dto.graphanalysis.SpotAnalysisDailyPriceDTO">
+        SELECT
+            t.date AS priceDate,
+            AVG(t.spot_price) AS avgSpotPrice
+        FROM spot_transactions t
+        JOIN companies c ON c.id = t.company_id
+        WHERE t.date BETWEEN #{startDate} AND #{endDate}
+          AND t.spot_price IS NOT NULL
+        <if test="filterType == 'company' and filterIds != null and filterIds.size() > 0">
+          AND t.company_id IN
+          <foreach collection="filterIds" item="id" open="(" separator="," close=")">
+            #{id}
+          </foreach>
+        </if>
+        <if test="filterType == 'region' and filterIds != null and filterIds.size() > 0">
+          AND c.region_id IN
+          <foreach collection="filterIds" item="id" open="(" separator="," close=")">
+            #{id}
+          </foreach>
+        </if>
+        GROUP BY t.date
+        ORDER BY t.date
+    </select>
+
+</mapper>

@@ -1,7 +1,10 @@
 package com.chng.powerexdashboardbackend.enums;
 
+import lombok.Getter;
+
 import java.util.Arrays;
 
+@Getter
 public enum TransactionTypeEnum {
 
     DIRECT(1, "直接"),
@@ -15,14 +18,6 @@ public enum TransactionTypeEnum {
     TransactionTypeEnum(int id, String name) {
         this.id = id;
         this.name = name;
-    }
-
-    public int getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
     }
 
     public static TransactionTypeEnum of(int id) {

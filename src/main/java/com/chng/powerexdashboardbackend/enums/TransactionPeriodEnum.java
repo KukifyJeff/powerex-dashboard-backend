@@ -1,7 +1,10 @@
 package com.chng.powerexdashboardbackend.enums;
 
+import lombok.Getter;
+
 import java.util.Arrays;
 
+@Getter
 public enum TransactionPeriodEnum {
 
     YEARLY(1, "年度"),
@@ -17,14 +20,6 @@ public enum TransactionPeriodEnum {
     TransactionPeriodEnum(int id, String name) {
         this.id = id;
         this.name = name;
-    }
-
-    public int getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
     }
 
     public static TransactionPeriodEnum of(int id) {
