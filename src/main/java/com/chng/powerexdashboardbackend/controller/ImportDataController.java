@@ -45,6 +45,19 @@ public class ImportDataController {
         }
     }
 
+    @PostMapping(value = "/upload/longterm/async", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ImportDataUploadResponse uploadLongtermAsync(
+            @RequestPart("files") MultipartFile[] files,
+            @RequestParam(required = false) String createdBy) {
+        try {
+            return importDataService.uploadLongtermAndNormalizeAsync(files, createdBy);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
+        }
+    }
+
     @PostMapping(value = "/upload/spot", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ImportDataUploadResponse uploadSpot(
             @RequestPart("files") MultipartFile[] files,
@@ -58,12 +71,38 @@ public class ImportDataController {
         }
     }
 
+    @PostMapping(value = "/upload/spot/async", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ImportDataUploadResponse uploadSpotAsync(
+            @RequestPart("files") MultipartFile[] files,
+            @RequestParam(required = false) String createdBy) {
+        try {
+            return importDataService.uploadSpotAndNormalizeAsync(files, createdBy);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
+        }
+    }
+
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ImportDataUploadResponse upload(
             @RequestPart("files") MultipartFile[] files,
             @RequestParam(required = false) String createdBy) {
         try {
             return importDataService.uploadAndNormalize(files, createdBy);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
+        }
+    }
+
+    @PostMapping(value = "/upload/async", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ImportDataUploadResponse uploadAsync(
+            @RequestPart("files") MultipartFile[] files,
+            @RequestParam(required = false) String createdBy) {
+        try {
+            return importDataService.uploadAndNormalizeAsync(files, createdBy);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IllegalStateException ex) {
@@ -90,6 +129,8 @@ public class ImportDataController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Confirm failed: " + ex.getMessage());
         }
     }
 
@@ -113,6 +154,8 @@ public class ImportDataController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Rollback failed: " + ex.getMessage());
         }
     }
 
@@ -126,6 +169,8 @@ public class ImportDataController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Rollback failed: " + ex.getMessage());
         }
     }
 }

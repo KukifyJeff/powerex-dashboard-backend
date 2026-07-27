@@ -9,6 +9,9 @@ public class ImportDataFileItem {
     private String status;
     private Integer totalRows;
     private Integer normalizedRows;
+    private Integer duplicateRows;
+    private Integer newRows;
+    private Integer updatedRows;
     private Integer skippedRows;
     private Integer errorCount;
     private String errorMessage;

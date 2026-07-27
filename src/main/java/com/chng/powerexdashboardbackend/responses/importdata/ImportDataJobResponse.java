@@ -9,6 +9,7 @@ public class ImportDataJobResponse {
     private Long jobId;
     private String status;
     private Integer uploadedFileCount;
+    private Integer processedFileCount;
     private Integer longtermRowCount;
     private Integer spotRowCount;
     private Integer failedFileCount;

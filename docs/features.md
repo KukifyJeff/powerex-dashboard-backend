@@ -65,6 +65,7 @@
 ### 4.1 功能目标
 - 支持前端一次上传多个 Excel（`.xlsx/.xls`）。
 - 后端按 `docs/db_migrate_all.py` 的核心规则做规范化（列映射、日期/周期、百分比、空值、字典映射）。
+- 规范化阶段会按业务字段去重（与数据库现存数据 + 本次上传内同时去重），并在文件级结果返回 `duplicateRows`（重复行）和 `newRows`（新增行）。
 - 上传后先进入导入任务（job）与 staging，不直接污染线上表。
 - 仅在管理员密码确认后发布为新版本并覆盖线上数据。
 - 支持版本列表查询与一键回滚到任意历史版本。
@@ -72,6 +73,9 @@
 ### 4.2 后端接口
 - `POST /api/import-data/upload/longterm`（multipart，`files[]`）
 - `POST /api/import-data/upload/spot`（multipart，`files[]`）
+- `POST /api/import-data/upload/async`（异步，立即返回 jobId）
+- `POST /api/import-data/upload/longterm/async`（异步，立即返回 jobId）
+- `POST /api/import-data/upload/spot/async`（异步，立即返回 jobId）
 - `GET /api/import-data/jobs/{jobId}`
 - `POST /api/import-data/confirm`
 - `GET /api/import-data/versions`
@@ -94,6 +98,4 @@
   - `scripts/db/pitr-recover.sh`
 
 ### 4.5 配置项
-- `app.import-data.admin-password-hash`
-  - 从环境变量 `IMPORT_DATA_ADMIN_PASSWORD_HASH` 注入
-  - 必须是 BCrypt 哈希值
+- ImportData 管理员密码当前使用固定字符串：`ChngPowerEx_2026`。

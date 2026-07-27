@@ -49,6 +49,8 @@ curl -X POST 'http://localhost:8080/api/import-data/upload?createdBy=yuqi' \
         "status": "SUCCESS|PARTIAL|FAILED",
         "totalRows": "int",
         "normalizedRows": "int",
+        "duplicateRows": "int",
+        "newRows": "int",
         "skippedRows": "int",
         "errorCount": "int",
         "errorMessage": "string|null"
@@ -81,6 +83,8 @@ curl -X POST 'http://localhost:8080/api/import-data/upload?createdBy=yuqi' \
         "status": "SUCCESS",
         "totalRows": 1532,
         "normalizedRows": 1532,
+        "duplicateRows": 0,
+        "newRows": 1532,
         "skippedRows": 0,
         "errorCount": 0,
         "errorMessage": null
@@ -91,6 +95,8 @@ curl -X POST 'http://localhost:8080/api/import-data/upload?createdBy=yuqi' \
         "status": "SUCCESS",
         "totalRows": 1268,
         "normalizedRows": 1268,
+        "duplicateRows": 0,
+        "newRows": 1268,
         "skippedRows": 0,
         "errorCount": 0,
         "errorMessage": null
@@ -196,6 +202,8 @@ curl -X POST 'http://localhost:8080/api/import-data/upload/spot?createdBy=yuqi' 
       "status": "string",
       "totalRows": "int",
       "normalizedRows": "int",
+      "duplicateRows": "int",
+      "newRows": "int",
       "skippedRows": "int",
       "errorCount": "int",
       "errorMessage": "string|null"

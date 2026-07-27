@@ -1,6 +1,5 @@
 package com.chng.powerexdashboardbackend.services.importdata;
 
-import com.chng.powerexdashboardbackend.config.ImportDataProperties;
 import com.chng.powerexdashboardbackend.enums.GenTypeEnum;
 import com.chng.powerexdashboardbackend.enums.TransactionPeriodEnum;
 import com.chng.powerexdashboardbackend.enums.TransactionTypeEnum;
@@ -11,23 +10,27 @@ import com.chng.powerexdashboardbackend.responses.importdata.ImportDataRestorePo
 import com.chng.powerexdashboardbackend.responses.importdata.ImportDataUploadResponse;
 import com.chng.powerexdashboardbackend.responses.importdata.ImportDataVersionItem;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -50,6 +53,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ImportDataService {
 
@@ -72,57 +76,92 @@ public class ImportDataService {
     private static final int MAX_ERROR_MESSAGE_LEN = 1000;
     private static final int MAX_NOTE_LEN = 500;
     private static final int MAX_OPERATOR_LEN = 64;
+    private static final String ADMIN_PASSWORD = "ChngPowerEx_2026";
 
     private final JdbcTemplate jdbcTemplate;
-    private final ImportDataProperties importDataProperties;
-    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    private final DataFormatter dataFormatter = new DataFormatter(Locale.SIMPLIFIED_CHINESE);
+    private final TaskExecutor taskExecutor;
+    private final DataFormatter dataFormatter = createDataFormatter();
+
+    private static DataFormatter createDataFormatter() {
+        DataFormatter formatter = new DataFormatter(Locale.SIMPLIFIED_CHINESE);
+        formatter.setUseCachedValuesForFormulaCells(true);
+        return formatter;
+    }
 
     public ImportDataUploadResponse uploadAndNormalize(MultipartFile[] files, String createdBy) {
         return uploadAndNormalizeInternal(files, createdBy, UploadMode.MIXED);
+    }
+
+    public ImportDataUploadResponse uploadAndNormalizeAsync(MultipartFile[] files, String createdBy) {
+        return uploadAndNormalizeAsyncInternal(files, createdBy, UploadMode.MIXED);
     }
 
     public ImportDataUploadResponse uploadLongtermAndNormalize(MultipartFile[] files, String createdBy) {
         return uploadAndNormalizeInternal(files, createdBy, UploadMode.LONGTERM_ONLY);
     }
 
+    public ImportDataUploadResponse uploadLongtermAndNormalizeAsync(MultipartFile[] files, String createdBy) {
+        return uploadAndNormalizeAsyncInternal(files, createdBy, UploadMode.LONGTERM_ONLY);
+    }
+
     public ImportDataUploadResponse uploadSpotAndNormalize(MultipartFile[] files, String createdBy) {
         return uploadAndNormalizeInternal(files, createdBy, UploadMode.SPOT_ONLY);
     }
 
+    public ImportDataUploadResponse uploadSpotAndNormalizeAsync(MultipartFile[] files, String createdBy) {
+        return uploadAndNormalizeAsyncInternal(files, createdBy, UploadMode.SPOT_ONLY);
+    }
+
     private ImportDataUploadResponse uploadAndNormalizeInternal(MultipartFile[] files, String createdBy, UploadMode mode) {
+        long startedAt = System.currentTimeMillis();
         if (files == null || files.length == 0) {
             throw new IllegalArgumentException("files is required");
         }
 
         long jobId = createJob(files.length, createdBy);
+        log.info("Import job {} started: mode={}, fileCount={}, createdBy={}", jobId, mode, files.length, createdBy);
         LookupMaps lookupMaps = loadLookupMaps();
         List<ImportDataFileItem> fileItems = new ArrayList<>();
         List<ParsedFile> parsedFiles = new ArrayList<>();
         List<NormalizedLongtermRow> allLongtermRows = new ArrayList<>();
         List<NormalizedSpotRow> allSpotRows = new ArrayList<>();
+        LongtermDedupContext longtermDedupContext = mode == UploadMode.SPOT_ONLY ? new LongtermDedupContext() : loadExistingLongtermDedupContext();
+        SpotDedupContext spotDedupContext = mode == UploadMode.LONGTERM_ONLY ? new SpotDedupContext() : loadExistingSpotDedupContext();
+        log.info("Import job {} baseline loaded: longtermKeys={}, spotKeys={}", jobId, longtermDedupContext.baselineByKey.size(), spotDedupContext.baselineByKey.size());
         int failedFileCount = 0;
 
         for (MultipartFile file : files) {
             ParsedFile parsed = parseFile(file, lookupMaps, mode);
             parsedFiles.add(parsed);
-            fileItems.add(parsed.toItem());
             if ("FAILED".equals(parsed.status)) {
                 failedFileCount++;
+                parsed.newRows = 0;
                 insertFileRecord(jobId, parsed);
+                fileItems.add(parsed.toItem());
+                log.warn("Import job {} file failed: file={}, type={}, totalRows={}, reason={}",
+                        jobId, parsed.fileName, parsed.dataType, parsed.totalRows, parsed.errorMessage);
                 continue;
             }
-            allLongtermRows.addAll(parsed.longtermRows);
-            allSpotRows.addAll(parsed.spotRows);
+            deduplicateAndCollect(parsed, allLongtermRows, allSpotRows, longtermDedupContext, spotDedupContext);
+            recalculateParsedStatus(parsed);
             insertFileRecord(jobId, parsed);
+            fileItems.add(parsed.toItem());
+            log.info("Import job {} file normalized: file={}, type={}, status={}, totalRows={}, normalizedRows={}, duplicateRows={}, newRows={}, updatedRows={}, skippedRows={}, errorCount={}",
+                    jobId, parsed.fileName, parsed.dataType, parsed.status, parsed.totalRows, parsed.normalizedRows,
+                    parsed.duplicateRows, parsed.newRows, parsed.updatedRows, parsed.skippedRows, parsed.errorCount);
         }
 
+        long stagingInsertStartedAt = System.currentTimeMillis();
         insertLongtermStagingRows(jobId, allLongtermRows);
         insertSpotStagingRows(jobId, allSpotRows);
+        log.info("Import job {} staging insert completed in {} ms", jobId, System.currentTimeMillis() - stagingInsertStartedAt);
 
         String finalStatus = allLongtermRows.isEmpty() && allSpotRows.isEmpty() ? JOB_STATUS_FAILED : JOB_STATUS_NORMALIZED;
         String errorMessage = JOB_STATUS_FAILED.equals(finalStatus) ? buildJobFailureMessage(parsedFiles) : null;
         updateJobAfterNormalize(jobId, finalStatus, allLongtermRows.size(), allSpotRows.size(), failedFileCount, errorMessage);
+        log.info("Import job {} completed: status={}, longtermRows={}, spotRows={}, failedFiles={}, error={}",
+                jobId, finalStatus, allLongtermRows.size(), allSpotRows.size(), failedFileCount, errorMessage);
+        log.info("Import job {} total elapsed={} ms", jobId, System.currentTimeMillis() - startedAt);
 
         ImportDataUploadResponse response = new ImportDataUploadResponse();
         response.setSuccess(JOB_STATUS_NORMALIZED.equals(finalStatus));
@@ -132,13 +171,104 @@ public class ImportDataService {
         return response;
     }
 
+    private ImportDataUploadResponse uploadAndNormalizeAsyncInternal(MultipartFile[] files, String createdBy, UploadMode mode) {
+        if (files == null || files.length == 0) {
+            throw new IllegalArgumentException("files is required");
+        }
+        List<BufferedUploadFile> bufferedFiles = bufferUploadFiles(files);
+        long jobId = createJob(files.length, createdBy);
+        log.info("Import job {} queued async: mode={}, fileCount={}, createdBy={}", jobId, mode, files.length, createdBy);
+        taskExecutor.execute(() -> processBufferedFiles(jobId, bufferedFiles, mode));
+
+        ImportDataUploadResponse response = new ImportDataUploadResponse();
+        response.setSuccess(true);
+        response.setMessage("Import started");
+        response.setData(getJob(jobId));
+        return response;
+    }
+
+    private List<BufferedUploadFile> bufferUploadFiles(MultipartFile[] files) {
+        List<BufferedUploadFile> bufferedFiles = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file == null) {
+                bufferedFiles.add(new BufferedUploadFile(null, new byte[0]));
+                continue;
+            }
+            try {
+                bufferedFiles.add(new BufferedUploadFile(file.getOriginalFilename(), file.getBytes()));
+            } catch (IOException ex) {
+                throw new IllegalArgumentException("Failed to read upload file: " + file.getOriginalFilename(), ex);
+            }
+        }
+        return bufferedFiles;
+    }
+
+    private void processBufferedFiles(long jobId, List<BufferedUploadFile> files, UploadMode mode) {
+        long startedAt = System.currentTimeMillis();
+        LookupMaps lookupMaps = loadLookupMaps();
+        List<ParsedFile> parsedFiles = new ArrayList<>();
+        List<NormalizedLongtermRow> allLongtermRows = new ArrayList<>();
+        List<NormalizedSpotRow> allSpotRows = new ArrayList<>();
+        LongtermDedupContext longtermDedupContext = mode == UploadMode.SPOT_ONLY ? new LongtermDedupContext() : loadExistingLongtermDedupContext();
+        SpotDedupContext spotDedupContext = mode == UploadMode.LONGTERM_ONLY ? new SpotDedupContext() : loadExistingSpotDedupContext();
+        int failedFileCount = 0;
+        try {
+            for (BufferedUploadFile file : files) {
+                ParsedFile parsed = parseFile(file, lookupMaps, mode);
+                parsedFiles.add(parsed);
+                if ("FAILED".equals(parsed.status)) {
+                    failedFileCount++;
+                    parsed.newRows = 0;
+                    insertFileRecord(jobId, parsed);
+                    log.warn("Import job {} file failed: file={}, type={}, totalRows={}, reason={}",
+                            jobId, parsed.fileName, parsed.dataType, parsed.totalRows, parsed.errorMessage);
+                } else {
+                    deduplicateAndCollect(parsed, allLongtermRows, allSpotRows, longtermDedupContext, spotDedupContext);
+                    recalculateParsedStatus(parsed);
+                    insertFileRecord(jobId, parsed);
+                    log.info("Import job {} file normalized: file={}, type={}, status={}, totalRows={}, normalizedRows={}, duplicateRows={}, newRows={}, updatedRows={}, skippedRows={}, errorCount={}",
+                            jobId, parsed.fileName, parsed.dataType, parsed.status, parsed.totalRows, parsed.normalizedRows,
+                            parsed.duplicateRows, parsed.newRows, parsed.updatedRows, parsed.skippedRows, parsed.errorCount);
+                }
+                updateJobProgress(jobId, allLongtermRows.size(), allSpotRows.size(), failedFileCount);
+            }
+
+            long stagingInsertStartedAt = System.currentTimeMillis();
+            insertLongtermStagingRows(jobId, allLongtermRows);
+            insertSpotStagingRows(jobId, allSpotRows);
+            log.info("Import job {} staging insert completed in {} ms", jobId, System.currentTimeMillis() - stagingInsertStartedAt);
+
+            String finalStatus = allLongtermRows.isEmpty() && allSpotRows.isEmpty() ? JOB_STATUS_FAILED : JOB_STATUS_NORMALIZED;
+            String errorMessage = JOB_STATUS_FAILED.equals(finalStatus) ? buildJobFailureMessage(parsedFiles) : null;
+            updateJobAfterNormalize(jobId, finalStatus, allLongtermRows.size(), allSpotRows.size(), failedFileCount, errorMessage);
+            log.info("Import job {} completed: status={}, longtermRows={}, spotRows={}, failedFiles={}, error={}",
+                    jobId, finalStatus, allLongtermRows.size(), allSpotRows.size(), failedFileCount, errorMessage);
+            log.info("Import job {} total elapsed={} ms", jobId, System.currentTimeMillis() - startedAt);
+        } catch (Exception ex) {
+            log.error("Import job {} async processing failed: {}", jobId, ex.getMessage(), ex);
+            updateJobAfterNormalize(
+                    jobId,
+                    JOB_STATUS_FAILED,
+                    allLongtermRows.size(),
+                    allSpotRows.size(),
+                    failedFileCount + 1,
+                    cap("Normalization failed: " + ex.getMessage(), MAX_ERROR_MESSAGE_LEN)
+            );
+        }
+    }
+
     public ImportDataJobResponse getJob(Long jobId) {
         ImportDataJobResponse job = jdbcTemplate.query("""
                 SELECT
-                    id, status, uploaded_file_count, longterm_row_count, spot_row_count, failed_file_count,
+                    j.id, j.status, j.uploaded_file_count, j.longterm_row_count, j.spot_row_count, j.failed_file_count,
+                    (
+                        SELECT COUNT(1)
+                        FROM import_job_files f
+                        WHERE f.job_id = j.id
+                    ) AS processed_file_count,
                     error_message, created_at, normalized_at, confirmed_at
-                FROM import_jobs
-                WHERE id = ?
+                FROM import_jobs j
+                WHERE j.id = ?
                 """, rs -> {
             if (!rs.next()) {
                 return null;
@@ -147,6 +277,7 @@ public class ImportDataService {
             item.setJobId(rs.getLong("id"));
             item.setStatus(rs.getString("status"));
             item.setUploadedFileCount(rs.getInt("uploaded_file_count"));
+            item.setProcessedFileCount(rs.getInt("processed_file_count"));
             item.setLongtermRowCount(rs.getInt("longterm_row_count"));
             item.setSpotRowCount(rs.getInt("spot_row_count"));
             item.setFailedFileCount(rs.getInt("failed_file_count"));
@@ -162,7 +293,7 @@ public class ImportDataService {
 
         List<ImportDataFileItem> files = jdbcTemplate.query("""
                 SELECT
-                    file_name, data_type, status, total_rows, normalized_rows, skipped_rows, error_count, error_message
+                    file_name, data_type, status, total_rows, normalized_rows, duplicate_rows, new_rows, updated_rows, skipped_rows, error_count, error_message
                 FROM import_job_files
                 WHERE job_id = ?
                 ORDER BY id
@@ -173,6 +304,9 @@ public class ImportDataService {
             item.setStatus(rs.getString("status"));
             item.setTotalRows(rs.getInt("total_rows"));
             item.setNormalizedRows(rs.getInt("normalized_rows"));
+            item.setDuplicateRows(rs.getInt("duplicate_rows"));
+            item.setNewRows(rs.getInt("new_rows"));
+            item.setUpdatedRows(rs.getInt("updated_rows"));
             item.setSkippedRows(rs.getInt("skipped_rows"));
             item.setErrorCount(rs.getInt("error_count"));
             item.setErrorMessage(rs.getString("error_message"));
@@ -184,6 +318,7 @@ public class ImportDataService {
 
     @Transactional
     public ImportDataActionResponse confirmJob(Long jobId, String adminPassword, String remark) {
+        log.info("Confirm job requested: jobId={}, remark={}", jobId, remark);
         assertAdminPassword(adminPassword);
         ImportDataJobResponse job = getJob(jobId);
         if (!JOB_STATUS_NORMALIZED.equals(job.getStatus())) {
@@ -191,6 +326,10 @@ public class ImportDataService {
         }
 
         Long previousActiveVersionId = getActiveVersionId();
+        if (previousActiveVersionId == null) {
+            log.warn("No active version found. Creating baseline version before confirming job {}", jobId);
+            previousActiveVersionId = createBaselineVersion(jobId);
+        }
         long versionId = createVersion(jobId, job.getLongtermRowCount(), job.getSpotRowCount(), remark);
         String versionCode = getVersionCode(versionId);
         MasterStatus beforeStatus = getMasterStatus();
@@ -207,34 +346,15 @@ public class ImportDataService {
         );
 
         jdbcTemplate.update("UPDATE import_versions SET status = ? WHERE status = ? AND id <> ?", VERSION_STATUS_INACTIVE, VERSION_STATUS_ACTIVE, versionId);
-        jdbcTemplate.update("""
-                INSERT INTO import_version_longterm_snapshot (
-                    version_id, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
-                    outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
-                    contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
-                    market_participation_capacity, market_avg_price, chng_participation_capacity,
-                    chng_transaction_amount, chng_avg_price, env_premium, data_source, note
-                )
-                SELECT
-                    ?, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
-                    outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
-                    contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
-                    market_participation_capacity, market_avg_price, chng_participation_capacity,
-                    chng_transaction_amount, chng_avg_price, env_premium, data_source, note
-                FROM import_job_longterm_rows
-                WHERE job_id = ?
-                """, versionId, jobId);
-        jdbcTemplate.update("""
-                INSERT INTO import_version_spot_snapshot (
-                    version_id, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
-                    longterm_percent, spot_price, chng_spot_price, data_source, note
-                )
-                SELECT
-                    ?, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
-                    longterm_percent, spot_price, chng_spot_price, data_source, note
-                FROM import_job_spot_rows
-                WHERE job_id = ?
-                """, versionId, jobId);
+        snapshotLongtermForVersion(versionId, jobId, job.getLongtermRowCount());
+        snapshotSpotForVersion(versionId, jobId, job.getSpotRowCount());
+        int versionLongtermRows = countLongtermSnapshotRows(versionId);
+        int versionSpotRows = countSpotSnapshotRows(versionId);
+        updateVersionRowCounts(
+                versionId,
+                versionLongtermRows,
+                versionSpotRows
+        );
 
         replaceLiveDataByVersion(versionId);
 
@@ -267,17 +387,21 @@ public class ImportDataService {
         response.setJobId(jobId);
         response.setVersionId(versionId);
         response.setVersionCode(versionCode);
+        log.info("Confirm job completed: jobId={}, versionId={}, versionCode={}, longtermRows={}, spotRows={}",
+                jobId, versionId, versionCode, versionLongtermRows, versionSpotRows);
         return response;
     }
 
     @Transactional
     public ImportDataActionResponse rollbackToVersion(Long versionId, String adminPassword, String reason) {
+        log.info("Rollback requested: targetVersionId={}, reason={}", versionId, reason);
         assertAdminPassword(adminPassword);
         return rollbackToVersionInternal(versionId, reason, "admin");
     }
 
     @Transactional
     public ImportDataActionResponse rollbackRecentVersions(Integer steps, String adminPassword, String reason) {
+        log.info("Rollback recent requested: steps={}, reason={}", steps, reason);
         assertAdminPassword(adminPassword);
         if (steps == null || steps < 1) {
             throw new IllegalArgumentException("steps must be >= 1");
@@ -348,6 +472,7 @@ public class ImportDataService {
     }
 
     private void replaceLiveDataByVersion(Long versionId) {
+        log.info("Replacing live data by version {}", versionId);
         jdbcTemplate.update("DELETE FROM longterm_transactions");
         jdbcTemplate.update("DELETE FROM spot_transactions");
 
@@ -380,6 +505,134 @@ public class ImportDataService {
                 FROM import_version_spot_snapshot
                 WHERE version_id = ?
                 """, versionId, versionId);
+    }
+
+    private void snapshotLongtermForVersion(Long versionId, Long jobId, int jobLongtermRows) {
+        if (jobLongtermRows > 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO import_version_longterm_snapshot (
+                        version_id, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
+                        outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
+                        contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
+                        market_participation_capacity, market_avg_price, chng_participation_capacity,
+                        chng_transaction_amount, chng_avg_price, env_premium, data_source, note
+                    )
+                    SELECT
+                        ?, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
+                        outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
+                        contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
+                        market_participation_capacity, market_avg_price, chng_participation_capacity,
+                        chng_transaction_amount, chng_avg_price, env_premium, data_source, note
+                    FROM import_job_longterm_rows
+                    WHERE job_id = ?
+                    """, versionId, jobId);
+            return;
+        }
+        jdbcTemplate.update("""
+                INSERT INTO import_version_longterm_snapshot (
+                    version_id, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
+                    outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
+                    contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
+                    market_participation_capacity, market_avg_price, chng_participation_capacity,
+                    chng_transaction_amount, chng_avg_price, env_premium, data_source, note
+                )
+                SELECT
+                    ?, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
+                    outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
+                    contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
+                    market_participation_capacity, market_avg_price, chng_participation_capacity,
+                    chng_transaction_amount, chng_avg_price, env_premium, data_source, note
+                FROM longterm_transactions
+                """, versionId);
+    }
+
+    private void snapshotSpotForVersion(Long versionId, Long jobId, int jobSpotRows) {
+        if (jobSpotRows > 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO import_version_spot_snapshot (
+                        version_id, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
+                        longterm_percent, spot_price, chng_spot_price, data_source, note
+                    )
+                    SELECT
+                        ?, s.company_id, s.date, s.gen_type_id, s.gen_amount, s.longterm_amount, s.longterm_price,
+                        s.longterm_percent, s.spot_price, s.chng_spot_price, s.data_source, s.note
+                    FROM spot_transactions s
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM import_job_spot_rows j
+                        WHERE j.job_id = ?
+                          AND j.company_id = s.company_id
+                          AND j.date = s.date
+                          AND j.gen_type_id = s.gen_type_id
+                    )
+                    """, versionId, jobId);
+            jdbcTemplate.update("""
+                    INSERT INTO import_version_spot_snapshot (
+                        version_id, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
+                        longterm_percent, spot_price, chng_spot_price, data_source, note
+                    )
+                    SELECT
+                        ?, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
+                        longterm_percent, spot_price, chng_spot_price, data_source, note
+                    FROM import_job_spot_rows
+                    WHERE job_id = ?
+                    """, versionId, jobId);
+            return;
+        }
+        jdbcTemplate.update("""
+                INSERT INTO import_version_spot_snapshot (
+                    version_id, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
+                    longterm_percent, spot_price, chng_spot_price, data_source, note
+                )
+                SELECT
+                    ?, company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
+                    longterm_percent, spot_price, chng_spot_price, data_source, note
+                FROM spot_transactions
+                """, versionId);
+    }
+
+    private int countLongtermSnapshotRows(Long versionId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM import_version_longterm_snapshot WHERE version_id = ?",
+                Integer.class,
+                versionId
+        );
+        return count == null ? 0 : count;
+    }
+
+    private int countSpotSnapshotRows(Long versionId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM import_version_spot_snapshot WHERE version_id = ?",
+                Integer.class,
+                versionId
+        );
+        return count == null ? 0 : count;
+    }
+
+    private void updateVersionRowCounts(Long versionId, int longtermRows, int spotRows) {
+        jdbcTemplate.update("""
+                UPDATE import_versions
+                SET longterm_row_count = ?, spot_row_count = ?
+                WHERE id = ?
+                """, longtermRows, spotRows, versionId);
+    }
+
+    private Long createBaselineVersion(Long jobId) {
+        long baselineVersionId = createVersion(jobId, 0, 0, "AUTO-BASELINE before first confirm");
+        snapshotLongtermForVersion(baselineVersionId, jobId, 0);
+        snapshotSpotForVersion(baselineVersionId, jobId, 0);
+        updateVersionRowCounts(
+                baselineVersionId,
+                countLongtermSnapshotRows(baselineVersionId),
+                countSpotSnapshotRows(baselineVersionId)
+        );
+        jdbcTemplate.update("""
+                UPDATE import_versions
+                SET status = ?, activated_at = NOW(), rolled_back_at = NULL
+                WHERE id = ?
+                """, VERSION_STATUS_ACTIVE, baselineVersionId);
+        log.info("Baseline version created: versionId={}, sourceJobId={}", baselineVersionId, jobId);
+        return baselineVersionId;
     }
 
     private ImportDataActionResponse rollbackToVersionInternal(Long versionId, String reason, String operator) {
@@ -429,6 +682,7 @@ public class ImportDataService {
         response.setMessage("Rollback completed");
         response.setVersionId(versionId);
         response.setVersionCode(getVersionCode(versionId));
+        log.info("Rollback completed: targetVersionId={}, previousActiveVersionId={}", versionId, previousActiveVersionId);
         return response;
     }
 
@@ -436,11 +690,7 @@ public class ImportDataService {
         if (adminPassword == null || adminPassword.isBlank()) {
             throw new SecurityException("Admin password is required");
         }
-        String hash = importDataProperties.getAdminPasswordHash();
-        if (hash == null || hash.isBlank()) {
-            throw new IllegalStateException("IMPORT_DATA_ADMIN_PASSWORD_HASH is not configured");
-        }
-        if (!passwordEncoder.matches(adminPassword, hash)) {
+        if (!ADMIN_PASSWORD.equals(adminPassword)) {
             throw new SecurityException("Invalid admin password");
         }
     }
@@ -511,24 +761,31 @@ public class ImportDataService {
     }
 
     private MasterStatus getMasterStatus() {
-        MasterStatus status = jdbcTemplate.query("SHOW MASTER STATUS", rs -> {
-            if (!rs.next()) {
+        try {
+            MasterStatus status = jdbcTemplate.query("SHOW MASTER STATUS", rs -> {
+                if (!rs.next()) {
+                    return null;
+                }
+                String file = rs.getString("File");
+                Long position = rs.getLong("Position");
+                String gtidSet = null;
+                try {
+                    gtidSet = rs.getString("Executed_Gtid_Set");
+                } catch (Exception ignored) {
+                    // Executed_Gtid_Set is not present when GTID is disabled.
+                }
+                return new MasterStatus(file, position, gtidSet);
+            });
+            if (status == null || status.binlogFile() == null || status.binlogFile().isBlank()) {
+                log.debug("SHOW MASTER STATUS returned empty; restore-point binlog metadata will be skipped");
                 return null;
             }
-            String file = rs.getString("File");
-            Long position = rs.getLong("Position");
-            String gtidSet = null;
-            try {
-                gtidSet = rs.getString("Executed_Gtid_Set");
-            } catch (Exception ignored) {
-                // Executed_Gtid_Set is not present when GTID is disabled.
-            }
-            return new MasterStatus(file, position, gtidSet);
-        });
-        if (status == null || status.binlogFile() == null || status.binlogFile().isBlank()) {
-            throw new IllegalStateException("MySQL binary logging is not enabled. Enable binlog before using confirm/rollback workflow.");
+            return status;
+        } catch (Exception ignored) {
+            // Some environments do not expose SHOW MASTER STATUS permission.
+            log.debug("SHOW MASTER STATUS unavailable; restore-point binlog metadata will be skipped");
+            return null;
         }
-        return status;
     }
 
     private void saveRestorePoint(String eventType,
@@ -540,6 +797,10 @@ public class ImportDataService {
                                   MasterStatus masterStatus,
                                   String note,
                                   String operator) {
+        if (masterStatus == null) {
+            log.debug("Skip restore point {} for action {} due to missing master status", eventType, triggerAction);
+            return;
+        }
         jdbcTemplate.update("""
                 INSERT INTO import_restore_points (
                     event_type, trigger_action, reference_job_id, reference_version_id,
@@ -579,78 +840,248 @@ public class ImportDataService {
                 """, status, longtermRows, spotRows, failedFileCount, cap(errorMessage, MAX_ERROR_MESSAGE_LEN), jobId);
     }
 
+    private void updateJobProgress(long jobId, int longtermRows, int spotRows, int failedFileCount) {
+        jdbcTemplate.update("""
+                UPDATE import_jobs
+                SET status = ?,
+                    longterm_row_count = ?,
+                    spot_row_count = ?,
+                    failed_file_count = ?
+                WHERE id = ?
+                """, JOB_STATUS_PROCESSING, longtermRows, spotRows, failedFileCount, jobId);
+    }
+
     private void insertFileRecord(long jobId, ParsedFile file) {
         jdbcTemplate.update("""
                 INSERT INTO import_job_files (
-                    job_id, file_name, data_type, status, total_rows, normalized_rows, skipped_rows, error_count, error_message
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, jobId, file.fileName, file.dataType, file.status, file.totalRows, file.normalizedRows, file.skippedRows, file.errorCount, cap(file.errorMessage, MAX_ERROR_MESSAGE_LEN));
+                    job_id, file_name, data_type, status, total_rows, normalized_rows, duplicate_rows, new_rows, updated_rows, skipped_rows, error_count, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, jobId, file.fileName, file.dataType, file.status, file.totalRows, file.normalizedRows, file.duplicateRows, file.newRows, file.updatedRows, file.skippedRows, file.errorCount, cap(file.errorMessage, MAX_ERROR_MESSAGE_LEN));
     }
 
     private void insertLongtermStagingRows(long jobId, List<NormalizedLongtermRow> rows) {
-        for (NormalizedLongtermRow row : rows) {
-            jdbcTemplate.update("""
-                    INSERT INTO import_job_longterm_rows (
-                        job_id, file_name, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
-                        outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
-                        contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
-                        market_participation_capacity, market_avg_price, chng_participation_capacity,
-                        chng_transaction_amount, chng_avg_price, env_premium, data_source, note
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    jobId,
-                    row.fileName,
-                    row.transactionId,
-                    row.companyId,
-                    row.place,
-                    toDate(row.transactionDate),
-                    row.transactionName,
-                    row.transactionTypeId,
-                    row.outsendProvince,
-                    row.genTypeId,
-                    row.transactionPeriodId,
-                    row.transactionStartYear,
-                    row.transactionEndYear,
-                    toDate(row.contractStartDate),
-                    toDate(row.contractEndDate),
-                    row.isGreen,
-                    row.isCheap,
-                    row.basePrice,
-                    row.marketSize,
-                    row.marketParticipationCapacity,
-                    row.marketAvgPrice,
-                    row.chngParticipationCapacity,
-                    row.chngTransactionAmount,
-                    row.chngAvgPrice,
-                    row.envPremium,
-                    row.dataSource,
-                    row.note
-            );
+        if (rows == null || rows.isEmpty()) {
+            return;
         }
+        jdbcTemplate.batchUpdate("""
+                        INSERT INTO import_job_longterm_rows (
+                            job_id, file_name, transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
+                            outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
+                            contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
+                            market_participation_capacity, market_avg_price, chng_participation_capacity,
+                            chng_transaction_amount, chng_avg_price, env_premium, data_source, note
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                rows,
+                500,
+                (ps, row) -> {
+                    ps.setLong(1, jobId);
+                    ps.setString(2, row.fileName);
+                    ps.setObject(3, row.transactionId);
+                    ps.setObject(4, row.companyId);
+                    ps.setString(5, row.place);
+                    ps.setDate(6, toDate(row.transactionDate));
+                    ps.setString(7, row.transactionName);
+                    ps.setObject(8, row.transactionTypeId);
+                    ps.setString(9, row.outsendProvince);
+                    ps.setObject(10, row.genTypeId);
+                    ps.setObject(11, row.transactionPeriodId);
+                    ps.setObject(12, row.transactionStartYear);
+                    ps.setObject(13, row.transactionEndYear);
+                    ps.setDate(14, toDate(row.contractStartDate));
+                    ps.setDate(15, toDate(row.contractEndDate));
+                    ps.setObject(16, row.isGreen);
+                    ps.setObject(17, row.isCheap);
+                    ps.setBigDecimal(18, row.basePrice);
+                    ps.setBigDecimal(19, row.marketSize);
+                    ps.setBigDecimal(20, row.marketParticipationCapacity);
+                    ps.setBigDecimal(21, row.marketAvgPrice);
+                    ps.setBigDecimal(22, row.chngParticipationCapacity);
+                    ps.setBigDecimal(23, row.chngTransactionAmount);
+                    ps.setBigDecimal(24, row.chngAvgPrice);
+                    ps.setBigDecimal(25, row.envPremium);
+                    ps.setString(26, row.dataSource);
+                    ps.setString(27, row.note);
+                }
+        );
     }
 
     private void insertSpotStagingRows(long jobId, List<NormalizedSpotRow> rows) {
-        for (NormalizedSpotRow row : rows) {
-            jdbcTemplate.update("""
-                    INSERT INTO import_job_spot_rows (
-                        job_id, file_name, company_id, date, gen_type_id, gen_amount, longterm_amount,
-                        longterm_price, longterm_percent, spot_price, chng_spot_price, data_source, note
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    jobId,
-                    row.fileName,
-                    row.companyId,
-                    toDate(row.date),
-                    row.genTypeId,
-                    row.genAmount,
-                    row.longtermAmount,
-                    row.longtermPrice,
-                    row.longtermPercent,
-                    row.spotPrice,
-                    row.chngSpotPrice,
-                    row.dataSource,
-                    row.note
-            );
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        jdbcTemplate.batchUpdate("""
+                        INSERT INTO import_job_spot_rows (
+                            job_id, file_name, company_id, date, gen_type_id, gen_amount, longterm_amount,
+                            longterm_price, longterm_percent, spot_price, chng_spot_price, data_source, note
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                rows,
+                500,
+                (ps, row) -> {
+                    ps.setLong(1, jobId);
+                    ps.setString(2, row.fileName);
+                    ps.setObject(3, row.companyId);
+                    ps.setDate(4, toDate(row.date));
+                    ps.setObject(5, row.genTypeId);
+                    ps.setBigDecimal(6, row.genAmount);
+                    ps.setBigDecimal(7, row.longtermAmount);
+                    ps.setBigDecimal(8, row.longtermPrice);
+                    ps.setBigDecimal(9, row.longtermPercent);
+                    ps.setBigDecimal(10, row.spotPrice);
+                    ps.setBigDecimal(11, row.chngSpotPrice);
+                    ps.setString(12, row.dataSource);
+                    ps.setString(13, row.note);
+                }
+        );
+    }
+
+    private void deduplicateAndCollect(ParsedFile parsed,
+                                       List<NormalizedLongtermRow> allLongtermRows,
+                                       List<NormalizedSpotRow> allSpotRows,
+                                       LongtermDedupContext longtermDedupContext,
+                                       SpotDedupContext spotDedupContext) {
+        if (parsed.longtermRows != null) {
+            for (NormalizedLongtermRow row : parsed.longtermRows) {
+                String longtermKey = buildLongtermKey(row);
+                String longtermFingerprint = buildLongtermValueFingerprint(row);
+                String existingLongtermFingerprint = longtermDedupContext.baselineByKey.get(longtermKey);
+                if (existingLongtermFingerprint != null && existingLongtermFingerprint.equals(longtermFingerprint)) {
+                    parsed.duplicateRows++;
+                    parsed.skippedRows++;
+                    parsed.addReason("Duplicate row");
+                    continue;
+                }
+                if (!longtermDedupContext.currentUploadKeys.add(longtermKey)) {
+                    parsed.duplicateRows++;
+                    parsed.skippedRows++;
+                    parsed.addReason("Duplicate row");
+                    continue;
+                }
+                longtermDedupContext.baselineByKey.put(longtermKey, longtermFingerprint);
+                if (existingLongtermFingerprint == null) {
+                    parsed.newRows++;
+                } else {
+                    parsed.updatedRows++;
+                }
+                allLongtermRows.add(row);
+            }
+        }
+        if (parsed.spotRows != null) {
+            for (NormalizedSpotRow row : parsed.spotRows) {
+                String spotKey = buildSpotKey(row);
+                String valueFingerprint = buildSpotValueFingerprint(row);
+
+                String existingFingerprint = spotDedupContext.baselineByKey.get(spotKey);
+                if (existingFingerprint != null && existingFingerprint.equals(valueFingerprint)) {
+                    parsed.duplicateRows++;
+                    parsed.skippedRows++;
+                    parsed.addReason("Duplicate row");
+                    continue;
+                }
+
+                if (!spotDedupContext.currentUploadKeys.add(spotKey)) {
+                    parsed.duplicateRows++;
+                    parsed.skippedRows++;
+                    parsed.addReason("Duplicate row");
+                    continue;
+                }
+
+                spotDedupContext.baselineByKey.put(spotKey, valueFingerprint);
+                if (existingFingerprint == null) {
+                    parsed.newRows++;
+                } else {
+                    parsed.updatedRows++;
+                }
+                allSpotRows.add(row);
+            }
+        }
+        log.debug("File dedup result: file={}, type={}, normalizedRows={}, duplicateRows={}, newRows={}, updatedRows={}",
+                parsed.fileName, parsed.dataType, parsed.normalizedRows, parsed.duplicateRows, parsed.newRows, parsed.updatedRows);
+    }
+
+    private LongtermDedupContext loadExistingLongtermDedupContext() {
+        LongtermDedupContext context = new LongtermDedupContext();
+        jdbcTemplate.query("""
+                SELECT
+                    transaction_id, company_id, place, transaction_date, transaction_name, transaction_type_id,
+                    outsend_province, gen_type_id, transaction_period_id, transaction_start_year, transaction_end_year,
+                    contract_start_date, contract_end_date, is_green, is_cheap, base_price, market_size,
+                    market_participation_capacity, market_avg_price, chng_participation_capacity,
+                    chng_transaction_amount, chng_avg_price, env_premium, note
+                FROM longterm_transactions
+                """, rs -> {
+            NormalizedLongtermRow row = new NormalizedLongtermRow();
+            row.transactionId = rs.getObject("transaction_id", Integer.class);
+            row.companyId = rs.getObject("company_id", Long.class);
+            row.place = rs.getString("place");
+            Date transactionDate = rs.getDate("transaction_date");
+            row.transactionDate = transactionDate == null ? null : transactionDate.toLocalDate();
+            row.transactionName = rs.getString("transaction_name");
+            row.transactionTypeId = rs.getObject("transaction_type_id", Integer.class);
+            row.outsendProvince = rs.getString("outsend_province");
+            row.genTypeId = rs.getObject("gen_type_id", Integer.class);
+            row.transactionPeriodId = rs.getObject("transaction_period_id", Integer.class);
+            row.transactionStartYear = rs.getObject("transaction_start_year", Integer.class);
+            row.transactionEndYear = rs.getObject("transaction_end_year", Integer.class);
+            Date contractStartDate = rs.getDate("contract_start_date");
+            row.contractStartDate = contractStartDate == null ? null : contractStartDate.toLocalDate();
+            Date contractEndDate = rs.getDate("contract_end_date");
+            row.contractEndDate = contractEndDate == null ? null : contractEndDate.toLocalDate();
+            row.isGreen = rs.getObject("is_green", Boolean.class);
+            row.isCheap = rs.getObject("is_cheap", Boolean.class);
+            row.basePrice = rs.getBigDecimal("base_price");
+            row.marketSize = rs.getBigDecimal("market_size");
+            row.marketParticipationCapacity = rs.getBigDecimal("market_participation_capacity");
+            row.marketAvgPrice = rs.getBigDecimal("market_avg_price");
+            row.chngParticipationCapacity = rs.getBigDecimal("chng_participation_capacity");
+            row.chngTransactionAmount = rs.getBigDecimal("chng_transaction_amount");
+            row.chngAvgPrice = rs.getBigDecimal("chng_avg_price");
+            row.envPremium = rs.getBigDecimal("env_premium");
+            row.note = rs.getString("note");
+            context.baselineByKey.put(buildLongtermKey(row), buildLongtermValueFingerprint(row));
+        });
+        log.info("Loaded longterm baseline keys: {}", context.baselineByKey.size());
+        return context;
+    }
+
+    private SpotDedupContext loadExistingSpotDedupContext() {
+        SpotDedupContext context = new SpotDedupContext();
+        jdbcTemplate.query("""
+                SELECT
+                    company_id, date, gen_type_id, gen_amount, longterm_amount, longterm_price,
+                    longterm_percent, spot_price, chng_spot_price, note
+                FROM spot_transactions
+                """, rs -> {
+            NormalizedSpotRow row = new NormalizedSpotRow();
+            row.companyId = rs.getObject("company_id", Long.class);
+            Date date = rs.getDate("date");
+            row.date = date == null ? null : date.toLocalDate();
+            row.genTypeId = rs.getObject("gen_type_id", Integer.class);
+            row.genAmount = rs.getBigDecimal("gen_amount");
+            row.longtermAmount = rs.getBigDecimal("longterm_amount");
+            row.longtermPrice = rs.getBigDecimal("longterm_price");
+            row.longtermPercent = rs.getBigDecimal("longterm_percent");
+            row.spotPrice = rs.getBigDecimal("spot_price");
+            row.chngSpotPrice = rs.getBigDecimal("chng_spot_price");
+            row.note = rs.getString("note");
+            context.baselineByKey.put(buildSpotKey(row), buildSpotValueFingerprint(row));
+        });
+        log.info("Loaded spot baseline keys: {}", context.baselineByKey.size());
+        return context;
+    }
+
+    private void recalculateParsedStatus(ParsedFile parsed) {
+        int effectiveRows = parsed.newRows + parsed.updatedRows;
+        if (effectiveRows == 0) {
+            parsed.status = "FAILED";
+            parsed.errorMessage = buildReasonMessage(parsed, true);
+        } else if (parsed.errorCount > 0 || parsed.skippedRows > 0) {
+            parsed.status = "PARTIAL";
+            parsed.errorMessage = buildReasonMessage(parsed, false);
+        } else {
+            parsed.status = "SUCCESS";
+            parsed.errorMessage = null;
         }
     }
 
@@ -665,6 +1096,7 @@ public class ImportDataService {
         if (file == null || file.isEmpty()) {
             parsed.errorMessage = "Empty file";
             parsed.errorCount = 1;
+            log.warn("Skip empty file during import");
             return parsed;
         }
 
@@ -672,12 +1104,15 @@ public class ImportDataService {
         if (!(lower.endsWith(".xlsx") || lower.endsWith(".xls"))) {
             parsed.errorMessage = "Only .xlsx/.xls is supported";
             parsed.errorCount = 1;
+            log.warn("Unsupported file extension: file={}", parsed.fileName);
             return parsed;
         }
+        log.info("Parsing file: file={}, mode={}", parsed.fileName, mode);
 
         try (InputStream is = file.getInputStream(); Workbook workbook = WorkbookFactory.create(is)) {
             Sheet sheet = workbook.getSheetAt(0);
-            ParsedSheet parsedSheet = readSheet(sheet);
+            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
+            ParsedSheet parsedSheet = readSheet(sheet, evaluator);
 
             parsed.totalRows = parsedSheet.rows.size();
             if (parsedSheet.type == FileType.LONGTERM) {
@@ -705,20 +1140,99 @@ public class ImportDataService {
             if (parsed.normalizedRows == 0) {
                 parsed.status = "FAILED";
                 if (parsed.errorMessage == null) {
-                    parsed.errorMessage = buildReasonMessage(parsed);
+                    parsed.errorMessage = buildReasonMessage(parsed, true);
                 }
             } else if (parsed.errorCount > 0 || parsed.skippedRows > 0) {
                 parsed.status = "PARTIAL";
                 if (parsed.errorMessage == null) {
-                    parsed.errorMessage = buildReasonMessage(parsed);
+                    parsed.errorMessage = buildReasonMessage(parsed, false);
                 }
             } else {
                 parsed.status = "SUCCESS";
             }
+            log.info("Parse finished: file={}, detectedType={}, status={}, totalRows={}, normalizedRows={}, skippedRows={}, errorCount={}",
+                    parsed.fileName, parsed.dataType, parsed.status, parsed.totalRows, parsed.normalizedRows, parsed.skippedRows, parsed.errorCount);
             return parsed;
         } catch (Exception ex) {
             parsed.errorCount = 1;
             parsed.errorMessage = "Parse failed: " + ex.getMessage();
+            log.error("Parse exception: file={}, message={}", parsed.fileName, ex.getMessage(), ex);
+            return parsed;
+        }
+    }
+
+    private ParsedFile parseFile(BufferedUploadFile file, LookupMaps lookupMaps, UploadMode mode) {
+        ParsedFile parsed = new ParsedFile();
+        parsed.fileName = file == null ? null : file.fileName;
+        parsed.dataType = "UNKNOWN";
+        parsed.status = "FAILED";
+        parsed.longtermRows = new ArrayList<>();
+        parsed.spotRows = new ArrayList<>();
+
+        if (file == null || file.bytes == null || file.bytes.length == 0) {
+            parsed.errorMessage = "Empty file";
+            parsed.errorCount = 1;
+            log.warn("Skip empty file during import");
+            return parsed;
+        }
+
+        String lower = Optional.ofNullable(file.fileName).orElse("").toLowerCase(Locale.ROOT);
+        if (!(lower.endsWith(".xlsx") || lower.endsWith(".xls"))) {
+            parsed.errorMessage = "Only .xlsx/.xls is supported";
+            parsed.errorCount = 1;
+            log.warn("Unsupported file extension: file={}", parsed.fileName);
+            return parsed;
+        }
+        log.info("Parsing file: file={}, mode={}", parsed.fileName, mode);
+
+        try (InputStream is = new ByteArrayInputStream(file.bytes); Workbook workbook = WorkbookFactory.create(is)) {
+            Sheet sheet = workbook.getSheetAt(0);
+            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
+            ParsedSheet parsedSheet = readSheet(sheet, evaluator);
+
+            parsed.totalRows = parsedSheet.rows.size();
+            if (parsedSheet.type == FileType.LONGTERM) {
+                parsed.dataType = "LONGTERM";
+                if (mode == UploadMode.SPOT_ONLY) {
+                    parsed.errorCount = 1;
+                    parsed.errorMessage = "This endpoint only accepts spot files";
+                    return parsed;
+                }
+                parseLongtermRows(parsed, parsedSheet.rows, lookupMaps, file.fileName);
+            } else if (parsedSheet.type == FileType.SPOT) {
+                parsed.dataType = "SPOT";
+                if (mode == UploadMode.LONGTERM_ONLY) {
+                    parsed.errorCount = 1;
+                    parsed.errorMessage = "This endpoint only accepts longterm files";
+                    return parsed;
+                }
+                parseSpotRows(parsed, parsedSheet.rows, lookupMaps, file.fileName);
+            } else {
+                parsed.errorCount = 1;
+                parsed.errorMessage = "Cannot detect file type";
+                return parsed;
+            }
+
+            if (parsed.normalizedRows == 0) {
+                parsed.status = "FAILED";
+                if (parsed.errorMessage == null) {
+                    parsed.errorMessage = buildReasonMessage(parsed, true);
+                }
+            } else if (parsed.errorCount > 0 || parsed.skippedRows > 0) {
+                parsed.status = "PARTIAL";
+                if (parsed.errorMessage == null) {
+                    parsed.errorMessage = buildReasonMessage(parsed, false);
+                }
+            } else {
+                parsed.status = "SUCCESS";
+            }
+            log.info("Parse finished: file={}, detectedType={}, status={}, totalRows={}, normalizedRows={}, skippedRows={}, errorCount={}",
+                    parsed.fileName, parsed.dataType, parsed.status, parsed.totalRows, parsed.normalizedRows, parsed.skippedRows, parsed.errorCount);
+            return parsed;
+        } catch (Exception ex) {
+            parsed.errorCount = 1;
+            parsed.errorMessage = "Parse failed: " + ex.getMessage();
+            log.error("Parse exception: file={}, message={}", parsed.fileName, ex.getMessage(), ex);
             return parsed;
         }
     }
@@ -800,7 +1314,13 @@ public class ImportDataService {
         Integer fileLevelGenTypeId = detectSpotGenTypeFromFileName(fileName, maps.genTypeNameToId);
         for (Map<String, String> row : rows) {
             String companyName = getFirst(row, "公司", "所属公司");
+            if (isInstructionText(companyName)) {
+                continue;
+            }
             if (blank(companyName)) {
+                if (isFootnoteRow(row)) {
+                    continue;
+                }
                 parsed.skippedRows++;
                 parsed.addReason("Blank company row");
                 continue;
@@ -851,7 +1371,39 @@ public class ImportDataService {
         }
     }
 
-    private ParsedSheet readSheet(Sheet sheet) {
+    private boolean isFootnoteRow(Map<String, String> row) {
+        if (row == null || row.isEmpty()) {
+            return false;
+        }
+        List<String> values = row.values().stream()
+                .map(this::clean)
+                .filter(v -> !v.isEmpty())
+                .toList();
+        if (values.size() != 1) {
+            return false;
+        }
+        String value = values.get(0);
+        return value.startsWith("备注")
+                || value.startsWith("注：")
+                || value.startsWith("注:")
+                || value.startsWith("说明");
+    }
+
+    private boolean isInstructionText(String text) {
+        if (blank(text)) {
+            return false;
+        }
+        String value = clean(text);
+        return value.contains("填写说明")
+                || value.contains("单位统一用")
+                || value.contains("只需统计")
+                || value.contains("请根据")
+                || value.startsWith("说明")
+                || value.startsWith("注：")
+                || value.startsWith("注:");
+    }
+
+    private ParsedSheet readSheet(Sheet sheet, FormulaEvaluator evaluator) {
         int headerRowIndex = -1;
         FileType type = FileType.UNKNOWN;
         int maxProbe = Math.min(sheet.getLastRowNum(), 20);
@@ -867,7 +1419,7 @@ public class ImportDataService {
                 continue;
             }
             for (int c = minCell; c < maxCell; c++) {
-                String value = clean(cellValue(row.getCell(c)));
+                String value = clean(cellValue(row.getCell(c), evaluator));
                 if (!value.isEmpty()) {
                     headerSet.add(value);
                 }
@@ -888,7 +1440,7 @@ public class ImportDataService {
         }
 
         Row headerRow = sheet.getRow(headerRowIndex);
-        List<String> headers = buildHeaders(headerRow);
+        List<String> headers = buildHeaders(headerRow, evaluator);
         List<Map<String, String>> rows = new ArrayList<>();
         for (int i = headerRowIndex + 1; i <= sheet.getLastRowNum(); i++) {
             Row row = sheet.getRow(i);
@@ -902,7 +1454,7 @@ public class ImportDataService {
                 if (key == null || key.isBlank()) {
                     continue;
                 }
-                String value = clean(cellValue(row.getCell(c)));
+                String value = clean(cellValue(row.getCell(c), evaluator));
                 if (!value.isEmpty()) {
                     hasValue = true;
                 }
@@ -915,7 +1467,7 @@ public class ImportDataService {
         return new ParsedSheet(type, rows);
     }
 
-    private List<String> buildHeaders(Row row) {
+    private List<String> buildHeaders(Row row, FormulaEvaluator evaluator) {
         List<String> headers = new ArrayList<>();
         if (row == null) {
             return headers;
@@ -923,7 +1475,7 @@ public class ImportDataService {
         Map<String, Integer> seen = new HashMap<>();
         int max = row.getLastCellNum();
         for (int i = 0; i < max; i++) {
-            String raw = clean(cellValue(row.getCell(i)));
+            String raw = clean(cellValue(row.getCell(i), evaluator));
             String key = raw;
             int count = seen.getOrDefault(raw, 0);
             if (!raw.isEmpty() && count > 0) {
@@ -937,11 +1489,21 @@ public class ImportDataService {
         return headers;
     }
 
-    private String cellValue(Cell cell) {
+    private String cellValue(Cell cell, FormulaEvaluator evaluator) {
         if (cell == null) {
             return "";
         }
-        return dataFormatter.formatCellValue(cell);
+        try {
+            return dataFormatter.formatCellValue(cell, evaluator);
+        } catch (RuntimeException ex) {
+            String cellAddress = cell.getAddress() == null ? "unknown" : cell.getAddress().formatAsString();
+            log.debug("Formula evaluate failed at {}, fallback to cached/display value: {}", cellAddress, ex.getMessage());
+            try {
+                return dataFormatter.formatCellValue(cell);
+            } catch (RuntimeException ignored) {
+                return "";
+            }
+        }
     }
 
     private LookupMaps loadLookupMaps() {
@@ -1095,24 +1657,26 @@ public class ImportDataService {
                 .replace("日", "")
                 .replace("/", "-")
                 .replace(".", "-");
-        text = text.replaceAll("\\s+", "");
+        text = text.replace("T", " ").replace("t", " ").trim();
+        text = text.replaceAll("\\s+", " ");
+        String dateText = text.contains(" ") ? text.substring(0, text.indexOf(' ')) : text;
         try {
-            if (text.matches("\\d{4}-\\d{1,2}-\\d{1,2}")) {
-                String[] p = text.split("-");
+            if (dateText.matches("\\d{4}-\\d{1,2}-\\d{1,2}")) {
+                String[] p = dateText.split("-");
                 return LocalDate.of(Integer.parseInt(p[0]), Integer.parseInt(p[1]), Integer.parseInt(p[2]));
             }
-            if (text.matches("\\d{4}-\\d{1,2}")) {
-                String[] p = text.split("-");
+            if (dateText.matches("\\d{4}-\\d{1,2}")) {
+                String[] p = dateText.split("-");
                 return LocalDate.of(Integer.parseInt(p[0]), Integer.parseInt(p[1]), 1);
             }
-            if (text.matches("\\d{1,2}-\\d{1,2}") && defaultYear != null) {
-                String[] p = text.split("-");
+            if (dateText.matches("\\d{1,2}-\\d{1,2}") && defaultYear != null) {
+                String[] p = dateText.split("-");
                 return LocalDate.of(defaultYear, Integer.parseInt(p[0]), Integer.parseInt(p[1]));
             }
-            if (text.matches("\\d{1,2}") && defaultYear != null) {
-                return LocalDate.of(defaultYear, Integer.parseInt(text), 1);
+            if (dateText.matches("\\d{1,2}") && defaultYear != null) {
+                return LocalDate.of(defaultYear, Integer.parseInt(dateText), 1);
             }
-            Matcher numeric = Pattern.compile("(\\d{1,4})").matcher(text);
+            Matcher numeric = Pattern.compile("(\\d{1,4})").matcher(dateText);
             List<Integer> parts = new ArrayList<>();
             while (numeric.find()) {
                 parts.add(Integer.parseInt(numeric.group(1)));
@@ -1121,6 +1685,13 @@ public class ImportDataService {
                 int year = parts.get(0);
                 int month = parts.get(1);
                 int day = parts.get(2);
+                // e.g. 1/13/26 -> 2026-01-13
+                if (year <= 12 && month <= 31 && day <= 99) {
+                    int yy = day;
+                    year = yy >= 70 ? 1900 + yy : 2000 + yy;
+                    day = month;
+                    month = parts.get(0);
+                }
                 if (year < 100 && defaultYear != null) {
                     year = defaultYear;
                 }
@@ -1181,10 +1752,6 @@ public class ImportDataService {
         if (decimal == null) {
             return null;
         }
-        BigDecimal max = new BigDecimal("0.9999");
-        if (decimal.compareTo(max) > 0) {
-            return max;
-        }
         if (decimal.compareTo(BigDecimal.ZERO) < 0) {
             return BigDecimal.ZERO;
         }
@@ -1240,16 +1807,16 @@ public class ImportDataService {
         return timestamp.toLocalDateTime().format(DATE_TIME_FMT);
     }
 
-    private String buildReasonMessage(ParsedFile parsed) {
+    private String buildReasonMessage(ParsedFile parsed, boolean noValidRows) {
         if (parsed.reasonCounts.isEmpty()) {
-            return "No valid rows";
+            return noValidRows ? "No valid rows" : "Skipped rows";
         }
         String detail = parsed.reasonCounts.entrySet()
                 .stream()
                 .limit(MAX_REASON_ITEMS)
                 .map(e -> e.getKey() + " x" + e.getValue())
                 .collect(Collectors.joining("; "));
-        return "No valid rows. Reasons: " + detail;
+        return (noValidRows ? "No valid rows. Reasons: " : "Skipped rows. Reasons: ") + detail;
     }
 
     private String buildJobFailureMessage(List<ParsedFile> parsedFiles) {
@@ -1304,12 +1871,35 @@ public class ImportDataService {
         private Map<String, Integer> transactionPeriodNameToId;
     }
 
+    private static class BufferedUploadFile {
+        private final String fileName;
+        private final byte[] bytes;
+
+        private BufferedUploadFile(String fileName, byte[] bytes) {
+            this.fileName = fileName;
+            this.bytes = bytes;
+        }
+    }
+
+    private static class SpotDedupContext {
+        private final Map<String, String> baselineByKey = new HashMap<>();
+        private final Set<String> currentUploadKeys = new HashSet<>();
+    }
+
+    private static class LongtermDedupContext {
+        private final Map<String, String> baselineByKey = new HashMap<>();
+        private final Set<String> currentUploadKeys = new HashSet<>();
+    }
+
     private static class ParsedFile {
         private String fileName;
         private String dataType;
         private String status;
         private int totalRows;
         private int normalizedRows;
+        private int duplicateRows;
+        private int newRows;
+        private int updatedRows;
         private int skippedRows;
         private int errorCount;
         private String errorMessage;
@@ -1331,6 +1921,9 @@ public class ImportDataService {
             item.setStatus(status);
             item.setTotalRows(totalRows);
             item.setNormalizedRows(normalizedRows);
+            item.setDuplicateRows(duplicateRows);
+            item.setNewRows(newRows);
+            item.setUpdatedRows(updatedRows);
             item.setSkippedRows(skippedRows);
             item.setErrorCount(errorCount);
             item.setErrorMessage(errorMessage);
@@ -1380,6 +1973,81 @@ public class ImportDataService {
         private BigDecimal chngSpotPrice;
         private String dataSource;
         private String note;
+    }
+
+    private String buildLongtermKey(NormalizedLongtermRow row) {
+        return String.join("|",
+                keyPart(row.companyId),
+                keyPart(row.place),
+                keyPart(row.transactionDate),
+                keyPart(row.transactionName),
+                keyPart(row.transactionTypeId),
+                keyPart(row.outsendProvince),
+                keyPart(row.genTypeId),
+                keyPart(row.transactionPeriodId),
+                keyPart(row.transactionStartYear),
+                keyPart(row.transactionEndYear),
+                keyPart(row.contractStartDate),
+                keyPart(row.contractEndDate)
+        );
+    }
+
+    private String buildLongtermValueFingerprint(NormalizedLongtermRow row) {
+        return String.join("|",
+                keyPart(row.transactionId),
+                keyPart(row.isGreen),
+                keyPart(row.isCheap),
+                keyPart(row.basePrice),
+                keyPart(row.marketSize),
+                keyPart(row.marketParticipationCapacity),
+                keyPart(row.marketAvgPrice),
+                keyPart(row.chngParticipationCapacity),
+                keyPart(row.chngTransactionAmount),
+                keyPart(row.chngAvgPrice),
+                keyPart(row.envPremium),
+                keyPart(row.note)
+        );
+    }
+
+    private String buildSpotKey(NormalizedSpotRow row) {
+        // Spot records use business uniqueness: company + date + gen type.
+        return String.join("|",
+                keyPart(row.companyId),
+                keyPart(row.date),
+                keyPart(row.genTypeId)
+        );
+    }
+
+    private String buildSpotValueFingerprint(NormalizedSpotRow row) {
+        return String.join("|",
+                keyPartScaled(row.genAmount, 6),
+                keyPartScaled(row.longtermAmount, 6),
+                keyPartScaled(row.longtermPrice, 4),
+                // Backward-compatible precision for historical spot data.
+                keyPartScaled(row.longtermPercent, 4),
+                keyPartScaled(row.spotPrice, 4),
+                keyPartScaled(row.chngSpotPrice, 4)
+        );
+    }
+
+    private String keyPartScaled(BigDecimal value, int scale) {
+        if (value == null) {
+            return "";
+        }
+        return keyPart(value.setScale(scale, RoundingMode.HALF_UP));
+    }
+
+    private String keyPart(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof BigDecimal decimal) {
+            return decimal.stripTrailingZeros().toPlainString();
+        }
+        if (value instanceof LocalDate localDate) {
+            return localDate.toString();
+        }
+        return String.valueOf(value).trim();
     }
 
     private static class PeriodParseResult {
