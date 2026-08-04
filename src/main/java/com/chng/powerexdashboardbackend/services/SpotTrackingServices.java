@@ -88,7 +88,7 @@ public class SpotTrackingServices {
         }
         CompanyDefaultOrderSortUtil.sortByCompanyId(responseList, SpotDataResponse::getCompanyId);
         if (includeTotal && !responseList.isEmpty()) {
-            responseList.add(buildSpotTotalRow(responseList));
+            responseList.add(0, buildSpotTotalRow(responseList));
         }
         return responseList;
     }
@@ -266,7 +266,7 @@ public class SpotTrackingServices {
         CompanyDefaultOrderSortUtil.sortByCompanyId(result, SpotTrackingSummaryResponse::getCompanyId);
         if (includeTotal && !result.isEmpty()) {
             SpotTrackingSummaryResponse total = new SpotTrackingSummaryResponse();
-            total.setCompanyId(Integer.MAX_VALUE);
+            total.setCompanyId(-1);
             total.setCompanyName("合计");
             total.setYearlyHoldingRate(ratio(sumYearlyAmount, sumGen));
             total.setTotalHoldingRate(ratio(sumLongterm, sumGen));
@@ -282,7 +282,7 @@ public class SpotTrackingServices {
             } else {
                 total.setUnitCapacityIncome(null);
             }
-            result.add(total);
+            result.add(0, total);
         }
         return result;
     }
@@ -325,7 +325,7 @@ public class SpotTrackingServices {
         }
 
         SpotDataResponse total = new SpotDataResponse();
-        total.setCompanyId(Integer.MAX_VALUE);
+        total.setCompanyId(-1);
         total.setCompanyName("合计");
         total.setGenAmount(sumGen);
         total.setLongtermAmount(sumLongterm);

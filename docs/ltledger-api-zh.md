@@ -36,6 +36,7 @@
 ### 1) LTLedgerResponse（pivot）
 - `table: List<Map<String,Object>>`
   - 当前列：`companyId`, `companyName`, `chngTransactionAmount`, `chngTradedPrice`, `weightedBenchmarkPrice`
+  - 第一行固定为合计行：`companyId=-1`, `companyName=合计`
   - 当 `isGreen=true` 时，额外返回：`weightedEnvPremium`（环境溢价，按 `chngTransactionAmount` 加权均价）
 - `meta: { companyCount, rowCount, fullCompanyCoverage }`
 
@@ -71,6 +72,13 @@
 ```json
 {
   "table": [
+    {
+      "companyId": -1,
+      "companyName": "合计",
+      "chngTransactionAmount": 35240.12,
+      "chngTradedPrice": 409.21,
+      "weightedBenchmarkPrice": 361.74
+    },
     {
       "companyId": 1,
       "companyName": "河北",

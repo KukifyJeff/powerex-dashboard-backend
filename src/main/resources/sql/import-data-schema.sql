@@ -166,3 +166,72 @@ CREATE TABLE IF NOT EXISTS import_restore_points (
     INDEX idx_import_restore_points_action (trigger_action),
     INDEX idx_import_restore_points_to_version (to_version_id)
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(64) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(100) NULL,
+    status TINYINT NOT NULL DEFAULT 1,
+    last_login_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_users_username (username)
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(32) NOT NULL,
+    name VARCHAR(64) NOT NULL,
+    UNIQUE KEY uk_roles_code (code)
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    role_id BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user_roles_user_role (user_id, role_id),
+    INDEX idx_user_roles_user_id (user_id),
+    INDEX idx_user_roles_role_id (role_id),
+    CONSTRAINT fk_user_roles_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_user_roles_role FOREIGN KEY (role_id) REFERENCES roles(id)
+);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    token_hash VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked TINYINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_refresh_tokens_user_id (user_id),
+    INDEX idx_refresh_tokens_expires_at (expires_at),
+    CONSTRAINT fk_refresh_tokens_user FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+INSERT INTO roles (code, name)
+VALUES ('ADMIN', '管理员')
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+INSERT INTO roles (code, name)
+VALUES ('USER', '普通用户')
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+INSERT INTO users (username, password_hash, display_name, status, created_at, updated_at)
+SELECT 'admin', '$2b$12$E22fcysubh1i3.8EDCSlGeg1Q6D7S5IEOM1ZnKIUNNkJIWYRiVezy', '系统管理员', 1, NOW(), NOW()
+WHERE NOT EXISTS (
+    SELECT 1 FROM users WHERE username = 'admin'
+);
+
+INSERT INTO user_roles (user_id, role_id)
+SELECT u.id, r.id
+FROM users u
+JOIN roles r ON r.code = 'ADMIN'
+WHERE u.username = 'admin'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    WHERE ur.user_id = u.id
+      AND ur.role_id = r.id
+);

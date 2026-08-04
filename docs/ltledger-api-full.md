@@ -34,7 +34,7 @@ Schemas (Java class equivalents)
   - dataSource, note, createdAt
 
 - LTLedgerResponse (pivot response)
-  - table: List<Map<string,object>> (company rows with dynamic pivot columns)
+  - table: List<Map<string,object>> (company rows; first row is total: companyId=-1, companyName="合计")
   - raw: List<LTLedgerDTO> (optional raw rows used to build pivot)
   - filters: { transactionTypes[], powerTypes[], transactionPeriods[], contractStartMonths[], contractEndMonths[], greenPowerOptions[] }
   - meta: { companyCount, rowCount, fullCompanyCoverage }

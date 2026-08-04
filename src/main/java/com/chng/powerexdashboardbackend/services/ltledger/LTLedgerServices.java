@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class LTLedgerServices {
@@ -44,12 +45,15 @@ public class LTLedgerServices {
         boolean includeEnvPremium = Boolean.TRUE.equals(query.getIsGreen());
 
         List<LTLedgerDTO> rows = mapper.getLedgerPivot(genTypeIds, transactionTypeIds, transactionPeriodIds, contractRange.start(), contractRange.end(), green);
+        if (rows == null) {
+            rows = List.of();
+        }
         List<Map<String, Object>> table = pivotServices.buildPivot(rows, includeEnvPremium);
 
         LTLedgerResponse resp = new LTLedgerResponse();
         resp.setTable(table);
         LTLedgerResponse.Meta meta = new LTLedgerResponse.Meta();
-        meta.setCompanyCount(table.size());
+        meta.setCompanyCount((int) rows.stream().map(LTLedgerDTO::getCompanyId).filter(Objects::nonNull).distinct().count());
         meta.setRowCount(rows.size());
         meta.setFullCompanyCoverage(false);
         resp.setMeta(meta);
