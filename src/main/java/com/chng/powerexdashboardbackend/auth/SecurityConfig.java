@@ -29,7 +29,7 @@ public class SecurityConfig {
     @Value("${app.security.admin.password:admin}")
     private String adminPassword;
 
-    @Value("${app.security.cors.allowed-origins:http://10.133.27.210:3000,https://powerex.kukifyjeff.com}")
+    @Value("${app.security.cors.allowed-origins:http://10.133.27.210:3000,https://powerex.kukifyjeff.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}")
     private String[] allowedOrigins;
 
     private final JwtUtil jwtUtil;
@@ -86,10 +86,16 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(Arrays.asList(allowedOrigins));
+        config.setAllowedOriginPatterns(List.of(
+                "http://localhost:*",
+                "http://127.0.0.1:*",
+                "http://10.133.27.210:3000",
+                "https://powerex.kukifyjeff.com"
+        ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         config.setAllowCredentials(true);
-        config.setExposedHeaders(List.of("Authorization"));
+        config.setExposedHeaders(List.of("Authorization", "Content-Type"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;

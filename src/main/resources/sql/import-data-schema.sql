@@ -198,6 +198,24 @@ CREATE TABLE IF NOT EXISTS user_roles (
     CONSTRAINT fk_user_roles_role FOREIGN KEY (role_id) REFERENCES roles(id)
 );
 
+
+CREATE TABLE IF NOT EXISTS document_files (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(200) NOT NULL,
+    description VARCHAR(1000) NULL,
+    original_name VARCHAR(255) NOT NULL,
+    stored_name VARCHAR(255) NOT NULL,
+    directory VARCHAR(500) NOT NULL DEFAULT '',
+    file_path VARCHAR(1000) NOT NULL,
+    content_type VARCHAR(128) NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    uploaded_by VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_document_files_directory (directory),
+    INDEX idx_document_files_uploaded_by (uploaded_by),
+    INDEX idx_document_files_created_at (created_at)
+);
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
